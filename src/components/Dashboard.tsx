@@ -15,7 +15,6 @@ import {
 import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Badge } from '@/components/ui/badge'
 
 interface RankingItem {
   ranking: number
