@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') || '';
     const fecha = searchParams.get('fecha') || '';
+    const fechaDesde = searchParams.get('fechaDesde') || '';
+    const fechaHasta = searchParams.get('fechaHasta') || '';
     const turnoTipo = searchParams.get('turnoTipo') || '';
 
     let whereClause = 'WHERE 1=1';
@@ -71,6 +73,16 @@ export async function GET(request: NextRequest) {
         paramIndex++;
       }
     }
+    if (fechaDesde) {
+      whereClause += ` AND "fecha" >= $${paramIndex}`;
+      params.push(fechaDesde);
+      paramIndex++;
+    }
+    if (fechaHasta) {
+      whereClause += ` AND "fecha" <= $${paramIndex}`;
+      params.push(fechaHasta);
+      paramIndex++;
+    }
 
     let anomalies: any[];
     if (params.length > 0) {
@@ -84,9 +96,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const dates: any[] = await db.$queryRawUnsafe(
-      `SELECT DISTINCT "fecha" FROM "AnomaliaEvento" ORDER BY "fecha" DESC`
-    );
+    // Build a simple WHERE for unique dates (reuse fechaDesde/fechaHasta)
+    let datesWhereClause = '';
+    const datesParams: string[] = [];
+    let datesParamIndex = 1;
+    if (fechaDesde) {
+      datesWhereClause += ` WHERE "fecha" >= $${datesParamIndex}`;
+      datesParams.push(fechaDesde);
+      datesParamIndex++;
+    }
+    if (fechaHasta) {
+      datesWhereClause += `${fechaDesde ? ' AND' : ' WHERE'} "fecha" <= $${datesParamIndex}`;
+      datesParams.push(fechaHasta);
+      datesParamIndex++;
+    }
+
+    const dates: any[] = datesParams.length > 0
+      ? await db.$queryRawUnsafe(
+          `SELECT DISTINCT "fecha" FROM "AnomaliaEvento"${datesWhereClause} ORDER BY "fecha" DESC`,
+          ...datesParams
+        )
+      : await db.$queryRawUnsafe(
+          `SELECT DISTINCT "fecha" FROM "AnomaliaEvento" ORDER BY "fecha" DESC`
+        );
 
     return NextResponse.json({
       anomalies: anomalies || [],

@@ -9,6 +9,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const nombre = searchParams.get('nombre') || '';
     const fecha = searchParams.get('fecha') || '';
+    const fechaDesde = searchParams.get('fechaDesde') || '';
+    const fechaHasta = searchParams.get('fechaHasta') || '';
 
     let whereClause = 'WHERE 1=1';
     const params: string[] = [];
@@ -22,6 +24,16 @@ export async function GET(request: NextRequest) {
     if (fecha) {
       whereClause += ` AND "fecha" = $${paramIndex}`;
       params.push(fecha);
+      paramIndex++;
+    }
+    if (fechaDesde) {
+      whereClause += ` AND "fecha" >= $${paramIndex}`;
+      params.push(fechaDesde);
+      paramIndex++;
+    }
+    if (fechaHasta) {
+      whereClause += ` AND "fecha" <= $${paramIndex}`;
+      params.push(fechaHasta);
       paramIndex++;
     }
 
@@ -47,6 +59,13 @@ export async function GET(request: NextRequest) {
         ];
       }
       if (fecha) where.fecha = fecha;
+      if (fechaDesde || fechaHasta) {
+        const fechaFilter: any = { ...(where.fecha && typeof where.fecha === 'object' ? where.fecha : {}) };
+        if (typeof where.fecha === 'string') fechaFilter.equals = where.fecha;
+        if (fechaDesde) fechaFilter.gte = fechaDesde;
+        if (fechaHasta) fechaFilter.lte = fechaHasta;
+        where.fecha = fechaFilter;
+      }
 
       const sessions = await db.tiempoFuera.findMany({
         where,

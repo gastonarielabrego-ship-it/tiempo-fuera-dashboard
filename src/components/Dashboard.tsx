@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Upload, Clock, Users, TrendingUp, Search, Trophy,
-  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -31,6 +31,8 @@ interface StatsData {
   totalHoras: number
   empleadosUnicos: number
   promedioMinutos: number
+  totalEgresos: number
+  totalIngresos: number
 }
 
 interface MovementItem {
@@ -91,6 +93,15 @@ function formatDateDisplay(dateStr: string): string {
   return dateStr
 }
 
+function toISODate(displayStr: string): string {
+  if (!displayStr) return ''
+  const parts = displayStr.split('/')
+  if (parts.length === 3) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`
+  }
+  return displayStr
+}
+
 export default function Dashboard() {
   const [ranking, setRanking] = useState<RankingItem[]>([])
   const [stats, setStats] = useState<StatsData | null>(null)
@@ -98,11 +109,13 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
 
-  // Filter state (sin "Desde")
+  // Filter state
   const [sectorFilter, setSectorFilter] = useState('')
   const [empresaFilter, setEmpresaFilter] = useState('')
   const [turnoFilter, setTurnoFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [fechaDesde, setFechaDesde] = useState('')
+  const [fechaHasta, setFechaHasta] = useState('')
   const [sortBy, setSortBy] = useState<'tiempo' | 'salidas'>('tiempo')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -118,6 +131,8 @@ export default function Dashboard() {
       if (search) params.set('search', search)
       if (sortBy) params.set('sortBy', sortBy)
       params.set('page', String(page))
+      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
 
       const res = await fetch(`/api/ranking?${params}`)
       const data = await res.json()
@@ -131,7 +146,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [sectorFilter, empresaFilter, turnoFilter, search, sortBy, page])
+  }, [sectorFilter, empresaFilter, turnoFilter, search, sortBy, page, fechaDesde, fechaHasta])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -139,6 +154,8 @@ export default function Dashboard() {
       if (sectorFilter) params.set('sector', sectorFilter)
       if (empresaFilter) params.set('empresa', empresaFilter)
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
+      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
 
       const res = await fetch(`/api/stats?${params}`)
       const data = await res.json()
@@ -146,7 +163,7 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
-  }, [sectorFilter, empresaFilter, turnoFilter])
+  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde, fechaHasta])
 
   useEffect(() => {
     fetchRanking()
@@ -155,7 +172,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     setPage(1)
-  }, [sectorFilter, empresaFilter, search])
+  }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -175,11 +192,10 @@ export default function Dashboard() {
       const data = await res.json()
 
       if (res.ok) {
-        const extraMsg = data.anomalías > 0 ? ` | ${data.anomalías} inconsistencia(s) detectada(s)` : ''
-        toast.success(`${data.sessionsInserted} sesiones cargadas (${data.rowsProcessed} filas)${extraMsg}`)
+        const extraMsg = data.dobleEntradas > 0 ? ` | ${data.dobleEntradas} inconsistencia(s) detectada(s)` : ''
+        toast.success(`${data.sessionsInserted} sesiones cargadas (${data.rowsProcessed} filas, ${data.fichadasTotal} fichadas)${extraMsg}`)
         fetchRanking()
         fetchStats()
-        // Auto-fetch movements and anomalies after upload
         fetchAllMovements()
         fetchAnomalies()
       } else {
@@ -199,15 +215,15 @@ export default function Dashboard() {
     setEmpresaFilter('')
     setTurnoFilter('')
     setSearch('')
+    setFechaDesde('')
+    setFechaHasta('')
   }
 
-  // Movements state - carga todos al inicio
+  // Movements state
   const [movements, setMovements] = useState<MovementItem[]>([])
   const [movLoading, setMovLoading] = useState(false)
   const [movAutoNames, setMovAutoNames] = useState<string[]>([])
   const [movUniqueDates, setMovUniqueDates] = useState<string[]>([])
-
-  // Movements filter (optional)
   const [movNombre, setMovNombre] = useState('')
   const [movFecha, setMovFecha] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -215,7 +231,10 @@ export default function Dashboard() {
   const fetchAllMovements = useCallback(async () => {
     setMovLoading(true)
     try {
-      const res = await fetch('/api/movements')
+      const params = new URLSearchParams()
+      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+      const res = await fetch(`/api/movements?${params}`)
       const data = await res.json()
       setMovements(data.movements)
       setMovAutoNames(data.uniqueNames || [])
@@ -225,15 +244,16 @@ export default function Dashboard() {
     } finally {
       setMovLoading(false)
     }
-  }, [])
+  }, [fechaDesde, fechaHasta])
 
-  // Fetch filtered movements
   const fetchFilteredMovements = useCallback(async () => {
     setMovLoading(true)
     try {
       const params = new URLSearchParams()
       if (movNombre) params.set('nombre', movNombre)
       if (movFecha) params.set('fecha', movFecha)
+      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
       const res = await fetch(`/api/movements?${params}`)
       const data = await res.json()
       setMovements(data.movements)
@@ -244,9 +264,8 @@ export default function Dashboard() {
     } finally {
       setMovLoading(false)
     }
-  }, [movNombre, movFecha])
+  }, [movNombre, movFecha, fechaDesde, fechaHasta])
 
-  // Load all movements on first render if data exists
   useEffect(() => {
     if (filters.fechaMin) {
       fetchAllMovements()
@@ -267,16 +286,18 @@ export default function Dashboard() {
       if (anomSearch) params.set('search', anomSearch)
       if (anomFecha) params.set('fecha', anomFecha)
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
+      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
       const res = await fetch(`/api/anomalies?${params}`)
       const data = await res.json()
-      setAnomalies(data.anomalies)
+      setAnomalies(data.anomalies || [])
       setAnomUniqueDates(data.uniqueDates || [])
     } catch (err) {
       console.error('Error fetching anomalies:', err)
     } finally {
       setAnomLoading(false)
     }
-  }, [anomSearch, anomFecha, turnoFilter])
+  }, [anomSearch, anomFecha, turnoFilter, fechaDesde, fechaHasta])
 
   useEffect(() => {
     if (filters.fechaMin) {
@@ -290,15 +311,9 @@ export default function Dashboard() {
       const BOM = '\uFEFF'
       const headers = ['Tipo', 'Legajo', 'Nombre', 'Fecha', 'Hora', 'Duracion (min)', 'Turno', 'Sector', 'Empresa']
       const rows = movements.map(m => [
-        m.tipo,
-        m.legajo,
-        m.nombre,
-        m.fecha,
-        m.hora,
+        m.tipo, m.legajo, m.nombre, m.fecha, m.hora,
         m.duracionMinutos ? String(m.duracionMinutos) : '-',
-        m.turno,
-        m.sector,
-        m.empresa,
+        m.turno, m.sector, m.empresa,
       ])
       const csvContent = BOM + [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -323,15 +338,8 @@ export default function Dashboard() {
       const BOM = '\uFEFF'
       const headers = ['Legajo', 'Nombre', 'Fecha', '1ra Entrada', '2da Entrada', 'Diferencia (min)', 'Turno', 'Sector', 'Empresa']
       const rows = anomalies.map(a => [
-        a.legajo,
-        a.nombre,
-        a.fecha,
-        a.horaEntrada1,
-        a.horaEntrada2,
-        a.diferenciaMinutos,
-        a.turno,
-        a.sector,
-        a.empresa,
+        a.legajo, a.nombre, a.fecha, a.horaEntrada1, a.horaEntrada2,
+        a.diferenciaMinutos, a.turno, a.sector, a.empresa,
       ])
       const csvContent = BOM + [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -350,17 +358,19 @@ export default function Dashboard() {
     }
   }
 
-  const hasFilters = sectorFilter || empresaFilter || turnoFilter || search
+  const hasFilters = sectorFilter || empresaFilter || turnoFilter || search || fechaDesde || fechaHasta
 
-  // Fechas cargadas para mostrar en header
   const fechasCargadas = movUniqueDates.length > 0 ? movUniqueDates.sort().map(formatDateDisplay) : []
 
-  // Filter movements locally when filters are active
   const filteredMovements = movements.filter(m => {
     if (movNombre && !m.nombre.toLowerCase().includes(movNombre.toLowerCase()) && !m.legajo.includes(movNombre)) return false
     if (movFecha && m.fecha !== movFecha) return false
     return true
   })
+
+  const totalFichadas = movements.length
+  const egresosCount = movements.filter(m => m.tipo === 'Salida Depo').length
+  const ingresosCount = movements.filter(m => m.tipo === 'Entrada Depo').length
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -393,20 +403,40 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Stats Cards */}
+        {/* Stats Cards - 5 cards: Egresos, Ingresos, Tiempo Total, Empleados, Promedio */}
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <Card className="border-l-4 border-l-red-500">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
-                  <Clock className="h-4 w-4" />
+                  <LogOut className="h-4 w-4 text-red-500" />
+                  Egresos
+                </div>
+                <p className="text-2xl font-bold text-slate-900">{(stats.totalEgresos || 0).toLocaleString()}</p>
+                <p className="text-xs text-slate-400">salidas del depósito</p>
+              </CardContent>
+            </Card>
+            <Card className="border-l-4 border-l-green-500">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+                  <LogIn className="h-4 w-4 text-green-500" />
+                  Ingresos
+                </div>
+                <p className="text-2xl font-bold text-slate-900">{(stats.totalIngresos || 0).toLocaleString()}</p>
+                <p className="text-xs text-slate-400">ingresos al depósito</p>
+              </CardContent>
+            </Card>
+            <Card className="border-l-4 border-l-blue-500">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+                  <Clock className="h-4 w-4 text-blue-500" />
                   Tiempo Total
                 </div>
                 <p className="text-2xl font-bold text-slate-900">{formatDuration(stats.totalMinutos)}</p>
                 <p className="text-xs text-slate-400">{stats.totalHoras.toLocaleString()} horas</p>
               </CardContent>
             </Card>
-            <Card className="border-l-4 border-l-blue-500">
+            <Card className="border-l-4 border-l-amber-500">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
                   <Users className="h-4 w-4" />
@@ -416,7 +446,7 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-400">con registros</p>
               </CardContent>
             </Card>
-            <Card className="border-l-4 border-l-amber-500">
+            <Card className="border-l-4 border-l-purple-500">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
                   <TrendingUp className="h-4 w-4" />
@@ -424,16 +454,6 @@ export default function Dashboard() {
                 </div>
                 <p className="text-2xl font-bold text-slate-900">{formatDuration(stats.promedioMinutos)}</p>
                 <p className="text-xs text-slate-400">por salida</p>
-              </CardContent>
-            </Card>
-            <Card className="border-l-4 border-l-green-500">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
-                  <BarChart3 className="h-4 w-4" />
-                  Registros
-                </div>
-                <p className="text-2xl font-bold text-slate-900">{stats.totalRegistros.toLocaleString()}</p>
-                <p className="text-xs text-slate-400">salidas totales</p>
               </CardContent>
             </Card>
           </div>
@@ -467,10 +487,28 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {/* Filters - sin "Desde", sin MM */}
+        {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 items-end">
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">Desde</label>
+                <Input
+                  type="date"
+                  value={fechaDesde}
+                  onChange={(e) => setFechaDesde(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">Hasta</label>
+                <Input
+                  type="date"
+                  value={fechaHasta}
+                  onChange={(e) => setFechaHasta(e.target.value)}
+                  className="h-9"
+                />
+              </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar</label>
                 <div className="relative">
@@ -511,29 +549,27 @@ export default function Dashboard() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">Turno</label>
-                  <Select value={turnoFilter} onValueChange={(v) => setTurnoFilter(v === '__all__' ? '' : v)}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Todos" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">Todos</SelectItem>
-                      <SelectItem value="TM">TM - Mañana</SelectItem>
-                      <SelectItem value="TT">TT - Tarde</SelectItem>
-                      <SelectItem value="TN">TN - Noche</SelectItem>
-                      <SelectItem value="Descanso">Descanso</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-end">
-                  {hasFilters && (
-                    <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 text-slate-500">
-                      Limpiar
-                    </Button>
-                  )}
-                </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">Turno</label>
+                <Select value={turnoFilter} onValueChange={(v) => setTurnoFilter(v === '__all__' ? '' : v)}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos</SelectItem>
+                    <SelectItem value="TM">TM - Mañana</SelectItem>
+                    <SelectItem value="TT">TT - Tarde</SelectItem>
+                    <SelectItem value="TN">TN - Noche</SelectItem>
+                    <SelectItem value="Descanso">Descanso</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end">
+                {hasFilters && (
+                  <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 text-slate-500">
+                    Limpiar
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
@@ -549,9 +585,6 @@ export default function Dashboard() {
             <TabsTrigger value="movimientos" className="gap-2">
               <List className="h-4 w-4" />
               Movimientos
-              {anomalies.length > 0 && (
-                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{anomalies.length}</Badge>
-              )}
             </TabsTrigger>
             <TabsTrigger value="inconsistencias" className="gap-2">
               <AlertTriangle className="h-4 w-4" />
@@ -680,7 +713,7 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          {/* Movimientos - carga TODOS al entrar */}
+          {/* Movimientos */}
           <TabsContent value="movimientos">
             <Card>
               <CardHeader className="pb-3">
@@ -691,7 +724,7 @@ export default function Dashboard() {
                       Todos los Movimientos
                     </CardTitle>
                     <CardDescription>
-                      Egresos e ingresos de todos los empleados. {filteredMovements.length} registros.
+                      {egresosCount} egresos, {ingresosCount} ingresos. {filteredMovements.length} registros mostrados.
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
@@ -703,7 +736,6 @@ export default function Dashboard() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Filter controls */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
                   <div>
                     <label className="text-xs font-medium text-slate-500 mb-1 block">Filtrar por Nombre/Legajo</label>
@@ -743,7 +775,6 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Auto-suggest names */}
                 {movAutoNames.length > 0 && movNombre.length >= 2 && (
                   <div className="flex flex-wrap gap-1">
                     <span className="text-xs text-slate-400">Sugerencias:</span>
@@ -763,7 +794,6 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                {/* Movements table */}
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-md border">
                   <Table>
                     <TableHeader className="sticky top-0 bg-white z-10">
@@ -829,7 +859,7 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          {/* Inconsistencias - doble entrada (Entrada/Entrada) */}
+          {/* Inconsistencias */}
           <TabsContent value="inconsistencias">
             <Card>
               <CardHeader className="pb-3">
@@ -856,7 +886,6 @@ export default function Dashboard() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Filtros */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                   <div>
                     <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar Nombre/Legajo</label>
@@ -887,7 +916,6 @@ export default function Dashboard() {
                   </Button>
                 </div>
 
-                {/* Tabla de doble entrada */}
                 <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border">
                   <Table>
                     <TableHeader className="sticky top-0 bg-white z-10">
