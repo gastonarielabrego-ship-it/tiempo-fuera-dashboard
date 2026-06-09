@@ -1,0 +1,29 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model TiempoFuera {
+  id              String   @id @default(cuid())
+  legajo          String
+  nombre          String
+  fecha           String
+  jornadaDate     String
+  horaSalida      String
+  horaEntrada     String
+  duracionMinutos Float
+  turno           String
+  sector          String
+  empresa         String
+  createdAt       DateTime @default(now())
+
+  @@index([legajo, fecha])
+  @@index([sector])
+  @@index([empresa])
+  @@index([jornadaDate])
+}
