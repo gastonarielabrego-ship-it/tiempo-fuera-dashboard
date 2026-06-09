@@ -92,18 +92,31 @@ export async function POST(request: NextRequest) {
     const totalEvents = Array.from(map.values()).flat().length;
     console.log(`Upload: ${map.size} employees, ${totalEvents} events`);
 
-    // Pair Salida → Entrada + detect unpaired
+    // Pair Salida → Entrada + detect doble entrada
     const { randomUUID } = await import('crypto');
     const allValues: string[] = [];
     const anomaliaValues: string[] = [];
-    const pairedIndices = new Set<number>();
 
     for (const [legajo, evts] of map) {
       evts.sort((a: any, b: any) => a.key - b.key);
 
-      // Track which event indices get paired
       const localPaired = new Set<number>();
 
+      // 1) Detect double entries (two Entrada in a row = person left without scanning exit)
+      for (let i = 1; i < evts.length; i++) {
+        if (evts[i].tipo === 'E' && evts[i - 1].tipo === 'E') {
+          const esc = (str: string) => str.replace(/'/g, "''");
+          // Save BOTH consecutive entries with their times
+          anomaliaValues.push(
+            `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i - 1].nom)}', '${evts[i - 1].fec}', '${evts[i - 1].hor}', 'Doble Entrada', '${esc(evts[i - 1].tur)}', '${esc(evts[i - 1].sec)}', '${esc(evts[i - 1].emp)}')`
+          );
+          anomaliaValues.push(
+            `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i].nom)}', '${evts[i].fec}', '${evts[i].hor}', 'Doble Entrada', '${esc(evts[i].tur)}', '${esc(evts[i].sec)}', '${esc(evts[i].emp)}')`
+          );
+        }
+      }
+
+      // 2) Pair Salida → Entrada for ranking
       for (let i = 0; i < evts.length; i++) {
         if (evts[i].tipo !== 'S') continue;
         for (let j = i + 1; j < evts.length; j++) {
@@ -131,26 +144,15 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-
-      // Find unpaired events
-      for (let i = 0; i < evts.length; i++) {
-        if (localPaired.has(i)) continue;
-        const ev = evts[i];
-        const tipoDesc = ev.tipo === 'S' ? 'Salida sin Entrada' : 'Entrada sin Salida';
-        const esc = (str: string) => str.replace(/'/g, "''");
-        anomaliaValues.push(
-          `('${randomUUID()}', '${esc(legajo)}', '${esc(ev.nom)}', '${ev.fec}', '${ev.hor}', '${tipoDesc}', '${esc(ev.tur)}', '${esc(ev.sec)}', '${esc(ev.emp)}')`
-        );
-      }
     }
 
     if (!allValues.length && !anomaliaValues.length) {
       return NextResponse.json({
-        error: `No se encontraron pares salida/entrada ni anomalías (${rows.length} filas, ${map.size} empleados, ${totalEvents} eventos)`
+        error: `No se encontraron pares salida/entrada (${rows.length} filas, ${map.size} empleados, ${totalEvents} eventos)`
       }, { status: 400 });
     }
 
-    console.log(`Upload: ${allValues.length} pairs, ${anomaliaValues.length} anomalies, inserting to DB...`);
+    console.log(`Upload: ${allValues.length} pairs, ${anomaliaValues.length} anomalias, inserting to DB...`);
 
     // Ensure AnomaliaEvento table exists
     try {

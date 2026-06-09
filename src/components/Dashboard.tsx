@@ -265,6 +265,7 @@ export default function Dashboard() {
       const params = new URLSearchParams()
       if (anomSearch) params.set('search', anomSearch)
       if (anomFecha) params.set('fecha', anomFecha)
+      if (turnoFilter) params.set('turnoTipo', turnoFilter)
       const res = await fetch(`/api/anomalies?${params}`)
       const data = await res.json()
       setAnomalies(data.anomalies)
@@ -274,7 +275,7 @@ export default function Dashboard() {
     } finally {
       setAnomLoading(false)
     }
-  }, [anomSearch, anomFecha])
+  }, [anomSearch, anomFecha, turnoFilter])
 
   useEffect(() => {
     if (filters.fechaMin) {

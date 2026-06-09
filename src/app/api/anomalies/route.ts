@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { Prisma } from '@prisma/client';
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') || '';
     const fecha = searchParams.get('fecha') || '';
+    const turnoTipo = searchParams.get('turnoTipo') || '';
 
-    // Build where using raw query since Prisma client may not know AnomaliaEvento yet
     let whereClause = 'WHERE 1=1';
     const params: string[] = [];
     let paramIndex = 1;
@@ -22,6 +21,15 @@ export async function GET(request: NextRequest) {
       whereClause += ` AND "fecha" = $${paramIndex}`;
       params.push(fecha);
       paramIndex++;
+    }
+    if (turnoTipo) {
+      if (turnoTipo === 'Descanso') {
+        whereClause += ` AND "turno" ILIKE 'Descanso%'`;
+      } else if (turnoTipo === 'MM') {
+        whereClause += ` AND "turno" ILIKE 'MM%'`;
+      } else {
+        whereClause += ` AND "turno" ILIKE '${turnoTipo} -%'`;
+      }
     }
 
     const anomalies: any[] = await db.$queryRawUnsafe(
