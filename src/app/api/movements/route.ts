@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 15;
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const nombre = searchParams.get('nombre') || '';
     const fecha = searchParams.get('fecha') || '';
     const page = parseInt(searchParams.get('page') || '1');
-    const pageSize = parseInt(searchParams.get('pageSize') || '200');
+    const pageSize = parseInt(searchParams.get('pageSize') || '500');
 
     const where: Prisma.TiempoFueraWhereInput = {};
     if (nombre) {
@@ -24,6 +27,7 @@ export async function GET(request: NextRequest) {
     const sessions = await db.tiempoFuera.findMany({
       where,
       orderBy: { fecha: 'desc' },
+      take: pageSize * 2, // Limit raw sessions to avoid timeout
     });
 
     // Build individual movements from paired sessions

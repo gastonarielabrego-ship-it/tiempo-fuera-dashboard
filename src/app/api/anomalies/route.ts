@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 15;
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -28,14 +31,20 @@ export async function GET(request: NextRequest) {
       } else if (turnoTipo === 'MM') {
         whereClause += ` AND "turno" ILIKE 'MM%'`;
       } else {
-        whereClause += ` AND "turno" ILIKE '${turnoTipo} -%'`;
+        whereClause += ` AND "turno" ILIKE $${paramIndex}`;
+        params.push(`${turnoTipo} -%`);
+        paramIndex++;
       }
     }
 
-    const anomalies: any[] = await db.$queryRawUnsafe(
-      `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`,
-      ...params
-    );
+    const anomalies: any[] = params.length > 0
+      ? await db.$queryRawUnsafe(
+          `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`,
+          ...params
+        )
+      : await db.$queryRawUnsafe(
+          `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`
+        );
 
     const dates: any[] = await db.$queryRawUnsafe(
       `SELECT DISTINCT "fecha" FROM "AnomaliaEvento" ORDER BY "fecha" DESC`
