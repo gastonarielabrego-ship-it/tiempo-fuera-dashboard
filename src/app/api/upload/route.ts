@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import * as XLSX from 'xlsx';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 interface RawRow {
   legajo?: string | number;
@@ -194,13 +194,25 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Replace database content: delete old, insert new using Prisma ORM (works with PostgreSQL)
+    // Replace database content: delete old, insert new using raw SQL (fast)
     await db.tiempoFuera.deleteMany();
 
-    const batchSize = 500;
+    // Insert all in a single transaction using raw SQL for speed
+    const { randomUUID } = await import('crypto');
+    const batchSize = 1000;
     for (let i = 0; i < sessions.length; i += batchSize) {
       const batch = sessions.slice(i, i + batchSize);
-      await db.tiempoFuera.createMany({ data: batch });
+      const values = batch.map(s => {
+        const leg = s.legajo.replace(/'/g, "''");
+        const nom = s.nombre.replace(/'/g, "''");
+        const tur = s.turno.replace(/'/g, "''");
+        const sec = s.sector.replace(/'/g, "''");
+        const emp = s.empresa.replace(/'/g, "''");
+        return `('${randomUUID()}', '${leg}', '${nom}', '${s.fecha}', '${s.jornadaDate || s.fecha}', '${s.horaSalida}', '${s.horaEntrada}', ${s.duracionMinutos}, '${tur}', '${sec}', '${emp}')`;
+      }).join(',');
+      await db.$executeRawUnsafe(
+        `INSERT INTO "TiempoFuera" (id, legajo, nombre, fecha, "jornadaDate", "horaSalida", "horaEntrada", "duracionMinutos", turno, sector, empresa) VALUES ${values}`
+      );
     }
 
     return NextResponse.json({
