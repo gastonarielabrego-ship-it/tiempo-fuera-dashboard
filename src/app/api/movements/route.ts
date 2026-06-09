@@ -85,7 +85,8 @@ export async function GET(request: NextRequest) {
       params.push(fechaHasta); pIdx++;
     }
 
-    // SQL con jornada TN: eventos TN antes de las 10:00 pertenecen a la jornada del día anterior
+    // SQL con jornada TN: eventos TN desde 17:00→23:59 van al día siguiente
+    // así se unen con los de madrugada (00:00-09:59) que quedan con su fecha
     const sql = `
       WITH raw_fichadas AS (
         SELECT * FROM "Fichada" ${whereClause}
@@ -93,8 +94,8 @@ export async function GET(request: NextRequest) {
       with_jornada AS (
         SELECT *,
           CASE
-            WHEN turno ILIKE 'TN%' AND hora < '10:00:00' THEN
-              TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
+            WHEN turno ILIKE 'TN%' AND hora >= '17:00:00' THEN
+              TO_CHAR(("fecha"::date + INTERVAL '1 day'), 'YYYY-MM-DD')
             ELSE "fecha"
           END as jornada
         FROM raw_fichadas
@@ -141,8 +142,8 @@ export async function GET(request: NextRequest) {
     );
     const uniqueDates: any[] = await db.$queryRawUnsafe(
       `SELECT DISTINCT
-        CASE WHEN turno ILIKE 'TN%' AND hora < '10:00:00'
-          THEN TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
+        CASE WHEN turno ILIKE 'TN%' AND hora >= '17:00:00'
+          THEN TO_CHAR(("fecha"::date + INTERVAL '1 day'), 'YYYY-MM-DD')
           ELSE "fecha"
         END as jornada
         FROM "Fichada" ORDER BY jornada DESC`
