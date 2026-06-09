@@ -50,8 +50,9 @@ interface AnomaliaItem {
   legajo: string
   nombre: string
   fecha: string
-  hora: string
-  tipo: string
+  horaEntrada1: string
+  horaEntrada2: string
+  diferenciaMinutos: number
   turno: string
   sector: string
   empresa: string
@@ -320,13 +321,14 @@ export default function Dashboard() {
     if (!anomalies || anomalies.length === 0) return
     try {
       const BOM = '\uFEFF'
-      const headers = ['Tipo Anomalia', 'Legajo', 'Nombre', 'Fecha', 'Hora', 'Turno', 'Sector', 'Empresa']
+      const headers = ['Legajo', 'Nombre', 'Fecha', '1ra Entrada', '2da Entrada', 'Diferencia (min)', 'Turno', 'Sector', 'Empresa']
       const rows = anomalies.map(a => [
-        a.tipo,
         a.legajo,
         a.nombre,
         a.fecha,
-        a.hora,
+        a.horaEntrada1,
+        a.horaEntrada2,
+        a.diferenciaMinutos,
         a.turno,
         a.sector,
         a.empresa,
@@ -827,7 +829,7 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          {/* Inconsistencias - salidas sin entrada, entradas sin salida */}
+          {/* Inconsistencias - doble entrada (Entrada/Entrada) */}
           <TabsContent value="inconsistencias">
             <Card>
               <CardHeader className="pb-3">
@@ -835,10 +837,10 @@ export default function Dashboard() {
                   <div>
                     <CardTitle className="text-lg flex items-center gap-2">
                       <AlertTriangle className="h-5 w-5 text-amber-500" />
-                      Inconsistencias
+                      Doble Entrada
                     </CardTitle>
                     <CardDescription>
-                      Registros con salidas sin entrada o entradas sin salida. {anomalies.length} encontradas.
+                      Empleados con dos ingresos consecutivos sin registrar salida. {anomalies.length} encontradas.
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
@@ -854,7 +856,7 @@ export default function Dashboard() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Filters */}
+                {/* Filtros */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                   <div>
                     <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar Nombre/Legajo</label>
@@ -885,18 +887,19 @@ export default function Dashboard() {
                   </Button>
                 </div>
 
-                {/* Anomalies table */}
+                {/* Tabla de doble entrada */}
                 <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border">
                   <Table>
                     <TableHeader className="sticky top-0 bg-white z-10">
                       <TableRow className="bg-amber-50">
-                        <TableHead className="w-40">Tipo</TableHead>
                         <TableHead className="w-20">Legajo</TableHead>
                         <TableHead>Nombre</TableHead>
                         <TableHead className="w-28">Fecha</TableHead>
-                        <TableHead className="w-20 text-center">Hora</TableHead>
-                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
-                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+                        <TableHead className="w-20 text-center">1ra Entrada</TableHead>
+                        <TableHead className="w-20 text-center">2da Entrada</TableHead>
+                        <TableHead className="w-24 text-center">Diferencia</TableHead>
+                        <TableHead className="hidden md:table-cell">Turno</TableHead>
+                        <TableHead className="hidden lg:table-cell">Sector</TableHead>
                         <TableHead className="hidden xl:table-cell">Empresa</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -904,7 +907,7 @@ export default function Dashboard() {
                       {anomLoading ? (
                         Array.from({ length: 5 }).map((_, i) => (
                           <TableRow key={i}>
-                            {Array.from({ length: 8 }).map((_, j) => (
+                            {Array.from({ length: 9 }).map((_, j) => (
                               <TableCell key={j}>
                                 <div className="h-4 bg-slate-200 animate-pulse rounded" />
                               </TableCell>
@@ -913,24 +916,25 @@ export default function Dashboard() {
                         ))
                       ) : anomalies.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center py-12 text-slate-500">
-                            No se encontraron inconsistencias
+                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+                            No se encontraron dobles entradas
                           </TableCell>
                         </TableRow>
                       ) : (
                         anomalies.map((a, idx) => (
-                          <TableRow key={a.id || idx} className="bg-amber-50/50">
-                            <TableCell>
-                              <Badge variant="outline" className="text-xs bg-amber-100 text-amber-800 border-amber-300">
-                                {a.tipo}
-                              </Badge>
-                            </TableCell>
+                          <TableRow key={a.id || idx} className="bg-amber-50/50 hover:bg-amber-100/50 transition-colors">
                             <TableCell className="font-mono text-sm">{a.legajo}</TableCell>
                             <TableCell className="font-medium text-sm">{a.nombre}</TableCell>
                             <TableCell className="text-sm">{formatDateDisplay(a.fecha)}</TableCell>
-                            <TableCell className="text-center font-mono text-sm">{a.hora}</TableCell>
-                            <TableCell className="hidden lg:table-cell text-xs text-slate-500">{a.turno}</TableCell>
-                            <TableCell className="hidden md:table-cell text-sm">{a.sector}</TableCell>
+                            <TableCell className="text-center font-mono text-sm font-medium text-green-700">{a.horaEntrada1}</TableCell>
+                            <TableCell className="text-center font-mono text-sm font-medium text-green-700">{a.horaEntrada2}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-mono">
+                                {formatDuration(a.diferenciaMinutos)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-xs text-slate-500">{a.turno}</TableCell>
+                            <TableCell className="hidden lg:table-cell text-sm">{a.sector}</TableCell>
                             <TableCell className="hidden xl:table-cell text-sm">{a.empresa}</TableCell>
                           </TableRow>
                         ))

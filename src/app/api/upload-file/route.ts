@@ -66,7 +66,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`Upload: ${rows.length} rows from sheet "${sheetName}"`);
 
-    // Build events map
     const map = new Map<string, any[]>();
     for (const r of rows) {
       const fichero = val(r, ['FICHERO ', 'FICHERO']);
@@ -92,7 +91,6 @@ export async function POST(request: NextRequest) {
     const totalEvents = Array.from(map.values()).flat().length;
     console.log(`Upload: ${map.size} employees, ${totalEvents} events`);
 
-    // Pair Salida → Entrada + detect doble entrada
     const { randomUUID } = await import('crypto');
     const allValues: string[] = [];
     const anomaliaValues: string[] = [];
@@ -102,21 +100,19 @@ export async function POST(request: NextRequest) {
 
       const localPaired = new Set<number>();
 
-      // 1) Detect double entries (two Entrada in a row = person left without scanning exit)
+      // Detect doble entrada: dos Entrada seguidas sin Salida en medio
       for (let i = 1; i < evts.length; i++) {
         if (evts[i].tipo === 'E' && evts[i - 1].tipo === 'E') {
           const esc = (str: string) => str.replace(/'/g, "''");
-          // Save BOTH consecutive entries with their times
+          const diffMin = Math.round((evts[i].key - evts[i - 1].key) / 60000);
+          // Guardar como UNA fila con ambas horas y la diferencia
           anomaliaValues.push(
-            `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i - 1].nom)}', '${evts[i - 1].fec}', '${evts[i - 1].hor}', 'Doble Entrada', '${esc(evts[i - 1].tur)}', '${esc(evts[i - 1].sec)}', '${esc(evts[i - 1].emp)}')`
-          );
-          anomaliaValues.push(
-            `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i].nom)}', '${evts[i].fec}', '${evts[i].hor}', 'Doble Entrada', '${esc(evts[i].tur)}', '${esc(evts[i].sec)}', '${esc(evts[i].emp)}')`
+            `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i - 1].nom)}', '${evts[i - 1].fec}', '${evts[i - 1].hor}', '${evts[i].hor}', ${diffMin}, '${esc(evts[i - 1].tur)}', '${esc(evts[i - 1].sec)}', '${esc(evts[i - 1].emp)}')`
           );
         }
       }
 
-      // 2) Pair Salida → Entrada for ranking
+      // Pair Salida → Entrada for ranking
       for (let i = 0; i < evts.length; i++) {
         if (evts[i].tipo !== 'S') continue;
         for (let j = i + 1; j < evts.length; j++) {
@@ -125,7 +121,6 @@ export async function POST(request: NextRequest) {
             if (dur > 0 && dur < 720) {
               const [hS, mS] = evts[i].hor.split(':').map(Number);
               let jd = evts[i].fec;
-              // TN shift: starts at 23:00, ends at 05:20 next day
               if (evts[i].tur.toLowerCase().startsWith('tn')) {
                 if (hS < 5 || (hS === 5 && mS <= 20)) {
                   const d = new Date(evts[i].fec + 'T00:00:00');
@@ -152,9 +147,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    console.log(`Upload: ${allValues.length} pairs, ${anomaliaValues.length} anomalias, inserting to DB...`);
+    console.log(`Upload: ${allValues.length} pairs, ${anomaliaValues.length} doble entrada, inserting...`);
 
-    // Ensure AnomaliaEvento table exists
+    // Create table with horaEntrada2 and diferenciaMinutos
     try {
       await db.$executeRawUnsafe(`
         CREATE TABLE IF NOT EXISTS "AnomaliaEvento" (
@@ -162,8 +157,9 @@ export async function POST(request: NextRequest) {
           "legajo" TEXT NOT NULL,
           "nombre" TEXT NOT NULL,
           "fecha" TEXT NOT NULL,
-          "hora" TEXT NOT NULL,
-          "tipo" TEXT NOT NULL,
+          "horaEntrada1" TEXT NOT NULL,
+          "horaEntrada2" TEXT NOT NULL,
+          "diferenciaMinutos" INTEGER NOT NULL,
           "turno" TEXT NOT NULL,
           "sector" TEXT NOT NULL,
           "empresa" TEXT NOT NULL,
@@ -172,6 +168,14 @@ export async function POST(request: NextRequest) {
       `);
     } catch (e) {
       console.log('AnomaliaEvento table already exists or created');
+    }
+
+    // If table has old schema, recreate it
+    try {
+      await db.$executeRawUnsafe(`ALTER TABLE "AnomaliaEvento" ADD COLUMN IF NOT EXISTS "horaEntrada2" TEXT`);
+      await db.$executeRawUnsafe(`ALTER TABLE "AnomaliaEvento" ADD COLUMN IF NOT EXISTS "diferenciaMinutos" INTEGER`);
+    } catch (e) {
+      // Ignore
     }
 
     await db.$executeRawUnsafe(`DELETE FROM "TiempoFuera"`);
@@ -191,20 +195,20 @@ export async function POST(request: NextRequest) {
       for (let i = 0; i < anomaliaValues.length; i += batchSize) {
         const batch = anomaliaValues.slice(i, i + batchSize);
         await db.$executeRawUnsafe(
-          `INSERT INTO "AnomaliaEvento" (id, legajo, nombre, fecha, hora, tipo, turno, sector, empresa) VALUES ${batch.join(',')}`
+          `INSERT INTO "AnomaliaEvento" (id, legajo, nombre, fecha, "horaEntrada1", "horaEntrada2", "diferenciaMinutos", turno, sector, empresa) VALUES ${batch.join(',')}`
         );
       }
     }
 
     const verifyCount = await db.tiempoFuera.count();
-    const anomaliaCount = await db.$executeRawUnsafe(`SELECT COUNT(*)::int FROM "AnomaliaEvento"`) as any;
-    console.log(`Upload: done, ${verifyCount} records, ${anomaliaCount.count} anomalies`);
+    const anomaliaCount: any = await db.$queryRawUnsafe(`SELECT COUNT(*)::int as count FROM "AnomaliaEvento"`);
+    console.log(`Upload: done, ${verifyCount} records, ${anomaliaCount[0].count} doble entrada`);
 
     return NextResponse.json({
       success: true,
       rowsProcessed: rows.length,
       sessionsInserted: allValues.length,
-      anomalías: anomaliaValues.length,
+      dobleEntradas: anomaliaValues.length,
       verifyCount,
     });
   } catch (error) {

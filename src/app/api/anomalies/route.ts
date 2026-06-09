@@ -33,11 +33,10 @@ export async function GET(request: NextRequest) {
     }
 
     const anomalies: any[] = await db.$queryRawUnsafe(
-      `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "hora" DESC, "legajo" ASC`,
+      `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`,
       ...params
     );
 
-    // Get unique dates for filter
     const dates: any[] = await db.$queryRawUnsafe(
       `SELECT DISTINCT "fecha" FROM "AnomaliaEvento" ORDER BY "fecha" DESC`
     );
