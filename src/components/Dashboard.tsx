@@ -156,14 +156,20 @@ export default function Dashboard() {
 
     setUploading(true)
     try {
+      // Check that XLSX is loaded from CDN
+      const XLSXLib = (window as any).XLSX
+      if (!XLSXLib) {
+        toast.error('Error: la librería XLSX no se cargó. Recargá la página e intentá de nuevo.')
+        return
+      }
+
       toast.info('Leyendo archivo Excel...')
 
       // Parse Excel entirely in the browser to avoid Vercel 10s timeout
-      const XLSX = await import('xlsx')
       const arrayBuffer = await file.arrayBuffer()
-      const wb = XLSX.read(arrayBuffer, { type: 'array' })
+      const wb = XLSXLib.read(arrayBuffer, { type: 'array' })
       const sheetName = Object.keys(wb.Sheets).find(n => n.toLowerCase().includes('base')) || Object.keys(wb.Sheets)[0]
-      const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName])
+      const rows: any[] = XLSXLib.utils.sheet_to_json(wb.Sheets[sheetName])
 
       if (!rows.length) {
         toast.error('El archivo está vacío o no se encontraron datos')
