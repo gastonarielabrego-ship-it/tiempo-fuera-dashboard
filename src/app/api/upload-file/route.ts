@@ -149,10 +149,15 @@ export async function POST(request: NextRequest) {
 
     console.log(`Upload: ${allValues.length} pairs, ${anomaliaValues.length} doble entrada, inserting...`);
 
-    // Create table with horaEntrada2 and diferenciaMinutos
+    // Drop old table if it exists with wrong schema, then recreate with correct schema
+    try {
+      await db.$executeRawUnsafe(`DROP TABLE IF EXISTS "AnomaliaEvento"`);
+    } catch (e) {
+      // Ignore
+    }
     try {
       await db.$executeRawUnsafe(`
-        CREATE TABLE IF NOT EXISTS "AnomaliaEvento" (
+        CREATE TABLE "AnomaliaEvento" (
           "id" TEXT NOT NULL PRIMARY KEY,
           "legajo" TEXT NOT NULL,
           "nombre" TEXT NOT NULL,
@@ -166,16 +171,9 @@ export async function POST(request: NextRequest) {
           "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      console.log('AnomaliaEvento table created');
     } catch (e) {
-      console.log('AnomaliaEvento table already exists or created');
-    }
-
-    // If table has old schema, recreate it
-    try {
-      await db.$executeRawUnsafe(`ALTER TABLE "AnomaliaEvento" ADD COLUMN IF NOT EXISTS "horaEntrada2" TEXT`);
-      await db.$executeRawUnsafe(`ALTER TABLE "AnomaliaEvento" ADD COLUMN IF NOT EXISTS "diferenciaMinutos" INTEGER`);
-    } catch (e) {
-      // Ignore
+      console.error('Error creating AnomaliaEvento table:', e);
     }
 
     await db.$executeRawUnsafe(`DELETE FROM "TiempoFuera"`);

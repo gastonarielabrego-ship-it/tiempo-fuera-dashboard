@@ -37,26 +37,34 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const anomalies: any[] = params.length > 0
-      ? await db.$queryRawUnsafe(
-          `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`,
-          ...params
-        )
-      : await db.$queryRawUnsafe(
-          `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`
-        );
+    let anomalies: any[];
+    if (params.length > 0) {
+      anomalies = await db.$queryRawUnsafe(
+        `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`,
+        ...params
+      );
+    } else {
+      anomalies = await db.$queryRawUnsafe(
+        `SELECT * FROM "AnomaliaEvento" ${whereClause} ORDER BY "fecha" DESC, "horaEntrada1" ASC, "legajo" ASC`
+      );
+    }
 
     const dates: any[] = await db.$queryRawUnsafe(
       `SELECT DISTINCT "fecha" FROM "AnomaliaEvento" ORDER BY "fecha" DESC`
     );
 
     return NextResponse.json({
-      anomalies,
-      total: anomalies.length,
+      anomalies: anomalies || [],
+      total: anomalies?.length || 0,
       uniqueDates: dates.map((d: any) => d.fecha),
     });
   } catch (error) {
     console.error('Anomalies API error:', error);
-    return NextResponse.json({ error: 'Failed to fetch anomalies' }, { status: 500 });
+    return NextResponse.json({ 
+      anomalies: [], 
+      total: 0, 
+      uniqueDates: [],
+      error: 'Failed to fetch anomalies' 
+    }, { status: 500 });
   }
 }

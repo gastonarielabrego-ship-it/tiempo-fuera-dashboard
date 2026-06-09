@@ -32,8 +32,9 @@ model AnomaliaEvento {
   legajo   String
   nombre   String
   fecha    String
-  hora     String
-  tipo     String
+  horaEntrada1 String
+  horaEntrada2 String
+  diferenciaMinutos Int
   turno    String
   sector   String
   empresa  String
