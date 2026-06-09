@@ -803,7 +803,7 @@ export default function Dashboard() {
                         <TableHead>Nombre</TableHead>
                         <TableHead className="w-28">Fecha</TableHead>
                         <TableHead className="w-20 text-center">Hora</TableHead>
-                        <TableHead className="w-32 text-right">Dur. hasta próximo</TableHead>
+                        <TableHead className="w-32 text-right">Dur. desde anterior</TableHead>
                         <TableHead className="hidden lg:table-cell">Turno</TableHead>
                         <TableHead className="hidden md:table-cell">Sector</TableHead>
                         <TableHead className="hidden xl:table-cell">Empresa</TableHead>

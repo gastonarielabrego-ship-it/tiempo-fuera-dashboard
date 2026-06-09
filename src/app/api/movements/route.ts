@@ -102,19 +102,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Calcular duración dinámicamente entre CADA fila y la SIGUIENTE del mismo legajo+fecha
-    // Muestra diferencia sin importar el tipo (Egreso→Ingreso, Egreso→Egreso, Ingreso→Egreso, etc.)
+    // Calcular duración: diferencia entre la FILA ANTERIOR y la ACTUAL
+    // Primera fichada del día = sin duración. Las demás muestran tiempo desde el evento anterior.
     const movements: any[] = [];
     for (let i = 0; i < fichadas.length; i++) {
       const f = fichadas[i];
       let dur = null;
 
-      // Buscar la próxima fila del mismo legajo+fecha
-      if (i + 1 < fichadas.length) {
-        const next = fichadas[i + 1];
-        if (next.legajo === f.legajo && next.fecha === f.fecha) {
-          const [h1, m1, s1] = f.hora.split(':').map(Number);
-          const [h2, m2, s2] = next.hora.split(':').map(Number);
+      if (i > 0) {
+        const prev = fichadas[i - 1];
+        if (prev.legajo === f.legajo && prev.fecha === f.fecha) {
+          const [h1, m1, s1] = prev.hora.split(':').map(Number);
+          const [h2, m2, s2] = f.hora.split(':').map(Number);
           const durSec = (h2 * 3600 + m2 * 60 + s2) - (h1 * 3600 + m1 * 60 + s1);
           if (durSec > 0 && durSec < 86400) {
             dur = Math.round(durSec / 60 * 100) / 100;
