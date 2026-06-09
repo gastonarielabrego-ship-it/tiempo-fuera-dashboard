@@ -42,3 +42,20 @@ model AnomaliaEvento {
 
   @@index([legajo, fecha])
 }
+
+model Fichada {
+  id              String   @id @default(cuid())
+  legajo          String
+  nombre          String
+  fecha           String
+  hora            String
+  tipo            String
+  turno           String
+  sector          String
+  empresa         String
+  duracionMinutos Float?
+  createdAt       DateTime @default(now())
+
+  @@index([legajo, fecha])
+  @@index([fecha])
+}
