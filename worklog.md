@@ -36,3 +36,25 @@ Stage Summary:
 - Archivos modificados: /src/app/api/stats/route.ts, /src/components/Dashboard.tsx
 - El grafico "Top 10 Cantidad de Salidas" ahora muestra correctamente los empleados con mas salidas
 - Los filtros aplican tanto al ranking por tiempo como al ranking por salidas
+---
+Task ID: 2
+Agent: Main agent
+Task: Fix all fichadas loading + TN jornada date calculation
+
+Work Log:
+- Diagnosed issue: upload route only stored paired Salida→Entrada sessions, dropping unpaired events
+- Diagnosed issue: duration limit dur < 720 was rejecting valid TN shifts (18:00→06:00 = 720 exactly)
+- Diagnosed issue: TN jornada condition hS < 5 || (hS === 5 && mS <= 20) was too restrictive
+- Created new Fichada table to store ALL individual clock events (paired and unpaired)
+- Changed duration limit from 720 to 1440 minutes (24h) to accommodate long TN shifts
+- Fixed TN jornada: changed threshold to hS < 6 (covers 00:00-05:59 midnight crossover)
+- Updated movements endpoint to read from Fichada table with fallback to TiempoFuera
+- Added uniqueNames and uniqueDates queries back to movements endpoint
+- Updated schema.prisma with Fichada model
+- Deployed commit eb04d87 to Vercel - all endpoints passing
+
+Stage Summary:
+- All fichadas now stored individually in Fichada table
+- TN shifts starting at 18:00+ now correctly calculate jornada date
+- Movimientos tab shows ALL clock events, not just paired sessions
+- App live and healthy at https://tiempo-fuera-dashboard.vercel.app
