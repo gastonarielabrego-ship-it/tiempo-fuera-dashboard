@@ -78,15 +78,24 @@ export async function GET(request: NextRequest) {
         totalIngresos = counts[0].ingresos || 0;
       }
 
-      // Total minutos and promedio: sum of Ingreso durations only (same logic as ranking)
+      // Total minutos and promedio: sum of Ingreso durations only with TN jornada
       const statsSql = `
-        WITH fichadas AS (
+        WITH raw_fichadas AS (
           SELECT * FROM "Fichada" ${whereClause}
+        ),
+        with_jornada AS (
+          SELECT *,
+            CASE
+              WHEN turno ILIKE 'TN%' AND hora < '10:00:00' THEN
+                TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
+              ELSE "fecha"
+            END as jornada
+          FROM raw_fichadas
         ),
         ordered AS (
           SELECT *,
-            LAG(hora) OVER (PARTITION BY legajo, fecha ORDER BY hora) as prev_hora
-          FROM fichadas
+            LAG(hora) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as prev_hora
+          FROM with_jornada
         ),
         with_dur AS (
           SELECT *,

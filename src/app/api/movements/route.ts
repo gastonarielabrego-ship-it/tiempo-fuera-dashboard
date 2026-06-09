@@ -12,31 +12,6 @@ export async function GET(request: NextRequest) {
     const fechaDesde = searchParams.get('fechaDesde') || '';
     const fechaHasta = searchParams.get('fechaHasta') || '';
 
-    let whereClause = 'WHERE 1=1';
-    const params: string[] = [];
-    let paramIndex = 1;
-
-    if (nombre) {
-      whereClause += ` AND ("legajo" LIKE $${paramIndex} OR "nombre" ILIKE $${paramIndex})`;
-      params.push(`%${nombre}%`);
-      paramIndex++;
-    }
-    if (fecha) {
-      whereClause += ` AND "fecha" = $${paramIndex}`;
-      params.push(fecha);
-      paramIndex++;
-    }
-    if (fechaDesde) {
-      whereClause += ` AND "fecha" >= $${paramIndex}`;
-      params.push(fechaDesde);
-      paramIndex++;
-    }
-    if (fechaHasta) {
-      whereClause += ` AND "fecha" <= $${paramIndex}`;
-      params.push(fechaHasta);
-      paramIndex++;
-    }
-
     // Check if Fichada table exists
     let tableExists = false;
     try {
@@ -49,7 +24,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (!tableExists) {
-      // Fallback: read from TiempoFuera (old behavior)
+      // Fallback: read from TiempoFuera
       const { Prisma } = await import('@prisma/client');
       const where: any = {};
       if (nombre) {
@@ -60,8 +35,7 @@ export async function GET(request: NextRequest) {
       }
       if (fecha) where.fecha = fecha;
       if (fechaDesde || fechaHasta) {
-        const fechaFilter: any = { ...(where.fecha && typeof where.fecha === 'object' ? where.fecha : {}) };
-        if (typeof where.fecha === 'string') fechaFilter.equals = where.fecha;
+        const fechaFilter: any = {};
         if (fechaDesde) fechaFilter.gte = fechaDesde;
         if (fechaHasta) fechaFilter.lte = fechaHasta;
         where.fecha = fechaFilter;
@@ -73,7 +47,7 @@ export async function GET(request: NextRequest) {
         take: 800,
       });
 
-      const movements = [];
+      const movements: any[] = [];
       for (const s of sessions) {
         movements.push(
           { tipo: 'Salida Depo', legajo: s.legajo, nombre: s.nombre, fecha: s.fecha, hora: s.horaSalida, turno: s.turno, sector: s.sector, empresa: s.empresa },
@@ -89,73 +63,105 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ movements, total: movements.length, uniqueNames: [], uniqueDates: [] });
     }
 
-    // Read ALL fichadas from Fichada table (todas las fichadas individuales)
-    let fichadas: any[];
-    if (params.length > 0) {
-      fichadas = await db.$queryRawUnsafe(
-        `SELECT * FROM "Fichada" ${whereClause} ORDER BY "fecha" DESC, "legajo" ASC, "hora" ASC`,
-        ...params
-      );
-    } else {
-      fichadas = await db.$queryRawUnsafe(
-        `SELECT * FROM "Fichada" ${whereClause} ORDER BY "fecha" DESC, "legajo" ASC, "hora" ASC`
-      );
+    // Build WHERE clause
+    let whereClause = 'WHERE 1=1';
+    const params: string[] = [];
+    let pIdx = 1;
+
+    if (nombre) {
+      whereClause += ` AND ("legajo" LIKE $${pIdx} OR "nombre" ILIKE $${pIdx})`;
+      params.push(`%${nombre}%`); pIdx++;
+    }
+    if (fecha) {
+      whereClause += ` AND "fecha" = $${pIdx}`;
+      params.push(fecha); pIdx++;
+    }
+    if (fechaDesde) {
+      whereClause += ` AND "fecha" >= $${pIdx}`;
+      params.push(fechaDesde); pIdx++;
+    }
+    if (fechaHasta) {
+      whereClause += ` AND "fecha" <= $${pIdx}`;
+      params.push(fechaHasta); pIdx++;
     }
 
-    // Calcular duración: diferencia entre la FILA ANTERIOR y la ACTUAL
-    // Primera fichada del día = sin duración. Las demás muestran tiempo desde el evento anterior.
-    const movements: any[] = [];
-    for (let i = 0; i < fichadas.length; i++) {
-      const f = fichadas[i];
-      let dur = null;
+    // SQL con jornada TN: eventos TN antes de las 10:00 pertenecen a la jornada del día anterior
+    const sql = `
+      WITH raw_fichadas AS (
+        SELECT * FROM "Fichada" ${whereClause}
+      ),
+      with_jornada AS (
+        SELECT *,
+          CASE
+            WHEN turno ILIKE 'TN%' AND hora < '10:00:00' THEN
+              TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
+            ELSE "fecha"
+          END as jornada
+        FROM raw_fichadas
+      ),
+      ordered AS (
+        SELECT *,
+          LAG(hora) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as prev_hora,
+          ROW_NUMBER() OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as rn
+        FROM with_jornada
+      ),
+      with_dur AS (
+        SELECT *,
+          CASE
+            WHEN prev_hora IS NOT NULL AND rn > 1 THEN
+              ROUND(EXTRACT(EPOCH FROM hora::time - prev_hora::time) / 60, 2)
+            ELSE NULL
+          END as dur_min
+        FROM ordered
+      )
+      SELECT tipo, legajo, nombre, "fecha", hora, turno, sector, empresa, jornada, dur_min
+      FROM with_dur
+      ORDER BY jornada DESC, legajo ASC, "fecha" ASC, hora ASC
+    `;
 
-      if (i > 0) {
-        const prev = fichadas[i - 1];
-        if (prev.legajo === f.legajo && prev.fecha === f.fecha) {
-          const [h1, m1, s1] = prev.hora.split(':').map(Number);
-          const [h2, m2, s2] = f.hora.split(':').map(Number);
-          const durSec = (h2 * 3600 + m2 * 60 + s2) - (h1 * 3600 + m1 * 60 + s1);
-          if (durSec > 0 && durSec < 86400) {
-            dur = Math.round(durSec / 60 * 100) / 100;
-          }
-        }
-      }
+    const rows: any[] = params.length > 0
+      ? await db.$queryRawUnsafe(sql, ...params)
+      : await db.$queryRawUnsafe(sql);
 
-      movements.push({
-        tipo: f.tipo,
-        legajo: f.legajo,
-        nombre: f.nombre,
-        fecha: f.fecha,
-        hora: f.hora,
-        turno: f.turno,
-        sector: f.sector,
-        empresa: f.empresa,
-        duracionMinutos: dur,
-      });
-    }
+    const movements = rows.map((r: any) => ({
+      tipo: r.tipo,
+      legajo: r.legajo,
+      nombre: r.nombre,
+      fecha: r.fecha,
+      hora: r.hora,
+      turno: r.turno,
+      sector: r.sector,
+      empresa: r.empresa,
+      duracionMinutos: r.dur_min,
+    }));
 
-    // Get unique names and dates
+    // Unique names and dates (from jornada perspective)
     const uniqueNames: any[] = await db.$queryRawUnsafe(
       `SELECT DISTINCT nombre FROM "Fichada" ORDER BY nombre ASC LIMIT 500`
     );
     const uniqueDates: any[] = await db.$queryRawUnsafe(
-      `SELECT DISTINCT fecha FROM "Fichada" ORDER BY fecha DESC`
+      `SELECT DISTINCT
+        CASE WHEN turno ILIKE 'TN%' AND hora < '10:00:00'
+          THEN TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
+          ELSE "fecha"
+        END as jornada
+        FROM "Fichada" ORDER BY jornada DESC`
     );
 
     return NextResponse.json({
       movements,
       total: movements.length,
       uniqueNames: uniqueNames.map((n: any) => n.nombre),
-      uniqueDates: uniqueDates.map((d: any) => d.fecha),
+      uniqueDates: uniqueDates.map((d: any) => d.jornada),
     });
   } catch (error) {
     console.error('Movements API error:', error);
-    return NextResponse.json({ 
-      error: 'Failed to fetch movements', 
-      movements: [], 
-      total: 0, 
-      uniqueNames: [], 
-      uniqueDates: [] 
+    return NextResponse.json({
+      error: 'Failed to fetch movements',
+      movements: [],
+      total: 0,
+      uniqueNames: [],
+      uniqueDates: [],
     }, { status: 500 });
   }
 }
