@@ -9,12 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
-} from 'recharts'
-import {
   Upload, Clock, Users, TrendingUp, Search, Trophy, FileSpreadsheet,
-  BarChart3, PieChartIcon, RefreshCw, List, ArrowDownToLine, ArrowRightLeft
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -35,10 +31,6 @@ interface StatsData {
   totalHoras: number
   empleadosUnicos: number
   promedioMinutos: number
-  top10: Array<{ ranking: number; nombre: string; totalHoras: number; totalMinutos: number }>
-  top10Salidas: Array<{ ranking: number; nombre: string; salidas: number; totalHoras: number; totalMinutos: number }>
-  bySector: Array<{ sector: string; totalHoras: number; registros: number }>
-  byEmpresa: Array<{ empresa: string; totalHoras: number; registros: number }>
 }
 
 interface MovementItem {
@@ -60,8 +52,6 @@ interface FilterData {
   fechaMax: string
 }
 
-const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#8b5cf6', '#ec4899', '#f43f5e', '#14b8a6', '#a855f7']
-
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60)
   const m = Math.round(minutes % 60)
@@ -76,20 +66,30 @@ function getRankBadgeColor(ranking: number): string {
   return 'bg-muted text-muted-foreground'
 }
 
+function formatDateDisplay(dateStr: string): string {
+  if (!dateStr) return ''
+  const parts = dateStr.split('-')
+  if (parts.length === 3) {
+    const day = parts[2].padStart(2, '0')
+    const month = parts[1].padStart(2, '0')
+    const year = parts[0]
+    return `${day}/${month}/${year}`
+  }
+  return dateStr
+}
+
 export default function Dashboard() {
   const [ranking, setRanking] = useState<RankingItem[]>([])
   const [stats, setStats] = useState<StatsData | null>(null)
   const [filters, setFilters] = useState<FilterData>({ sectores: [], empresas: [], fechaMin: '', fechaMax: '' })
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [seeding, setSeeding] = useState(false)
 
   // Filter state
   const [sectorFilter, setSectorFilter] = useState('')
   const [empresaFilter, setEmpresaFilter] = useState('')
   const [turnoFilter, setTurnoFilter] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
-  const [fechaHasta, setFechaHasta] = useState('')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'tiempo' | 'salidas'>('tiempo')
   const [page, setPage] = useState(1)
@@ -104,7 +104,6 @@ export default function Dashboard() {
       if (empresaFilter) params.set('empresa', empresaFilter)
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
       if (fechaDesde) params.set('fechaDesde', fechaDesde)
-      if (fechaHasta) params.set('fechaHasta', fechaHasta)
       if (search) params.set('search', search)
       if (sortBy) params.set('sortBy', sortBy)
       params.set('page', String(page))
@@ -121,7 +120,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde, fechaHasta, search, sortBy, page])
+  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde, search, sortBy, page])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -130,7 +129,6 @@ export default function Dashboard() {
       if (empresaFilter) params.set('empresa', empresaFilter)
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
       if (fechaDesde) params.set('fechaDesde', fechaDesde)
-      if (fechaHasta) params.set('fechaHasta', fechaHasta)
 
       const res = await fetch(`/api/stats?${params}`)
       const data = await res.json()
@@ -138,7 +136,7 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
-  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde, fechaHasta])
+  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde])
 
   useEffect(() => {
     fetchRanking()
@@ -148,7 +146,7 @@ export default function Dashboard() {
   // Reset page on filter change
   useEffect(() => {
     setPage(1)
-  }, [sectorFilter, empresaFilter, fechaDesde, fechaHasta, search])
+  }, [sectorFilter, empresaFilter, fechaDesde, search])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -158,7 +156,6 @@ export default function Dashboard() {
     try {
       toast.info('Procesando archivo...')
 
-      // Send file directly to server - everything processed there
       const formData = new FormData()
       formData.append('file', file)
 
@@ -169,7 +166,7 @@ export default function Dashboard() {
       const data = await res.json()
 
       if (res.ok) {
-        toast.success(`${data.sessionsInserted} sesiones cargadas (${data.rowsProcessed} filas procesadas, ${data.verifyCount} registros en DB)`)
+        toast.success(`${data.sessionsInserted} sesiones cargadas (${data.rowsProcessed} filas procesadas)`)
         fetchRanking()
         fetchStats()
       } else {
@@ -184,31 +181,11 @@ export default function Dashboard() {
     }
   }
 
-  const handleSeed = async () => {
-    setSeeding(true)
-    try {
-      const res = await fetch('/api/seed', { method: 'POST' })
-      const data = await res.json()
-      if (res.ok) {
-        toast.success(`Base cargada: ${data.count} registros`)
-        fetchRanking()
-        fetchStats()
-      } else {
-        toast.error('Error al cargar la base de datos')
-      }
-    } catch (err) {
-      toast.error('Error al cargar la base')
-    } finally {
-      setSeeding(false)
-    }
-  }
-
   const clearFilters = () => {
     setSectorFilter('')
     setEmpresaFilter('')
     setTurnoFilter('')
     setFechaDesde('')
-    setFechaHasta('')
     setSearch('')
   }
 
@@ -276,7 +253,16 @@ export default function Dashboard() {
     }
   }
 
-  const hasFilters = sectorFilter || empresaFilter || turnoFilter || fechaDesde || fechaHasta || search
+  const hasFilters = sectorFilter || empresaFilter || turnoFilter || fechaDesde || search
+
+  // Determine date range to show
+  const fechaRango = filters.fechaMin && filters.fechaMax && filters.fechaMin === filters.fechaMax
+    ? formatDateDisplay(filters.fechaMin)
+    : (filters.fechaMin && filters.fechaMax)
+      ? `${formatDateDisplay(filters.fechaMin)} - ${formatDateDisplay(filters.fechaMax)}`
+      : filters.fechaMin
+        ? `Desde ${formatDateDisplay(filters.fechaMin)}`
+        : ''
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -292,7 +278,14 @@ export default function Dashboard() {
               <p className="text-sm text-slate-500">Ranking de tiempos muertos por empleado</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Loaded date badge */}
+            {fechaRango && (
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 px-3 py-1.5 rounded-lg">
+                <CalendarDays className="h-4 w-4" />
+                <span className="text-sm font-medium">{fechaRango}</span>
+              </div>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -358,7 +351,7 @@ export default function Dashboard() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 items-end">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 items-end">
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar</label>
                 <div className="relative">
@@ -427,43 +420,24 @@ export default function Dashboard() {
                     max={filters.fechaMax}
                   />
                 </div>
-                <div className="flex-1">
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">Hasta</label>
-                  <Input
-                    type="date"
-                    value={fechaHasta}
-                    onChange={(e) => setFechaHasta(e.target.value)}
-                    className="h-9"
-                    min={filters.fechaMin}
-                    max={filters.fechaMax}
-                  />
+                <div className="flex items-end">
+                  {hasFilters && (
+                    <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 text-slate-500">
+                      Limpiar
+                    </Button>
+                  )}
                 </div>
-              </div>
-              <div>
-                {hasFilters && (
-                  <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 text-slate-500">
-                    Limpiar filtros
-                  </Button>
-                )}
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Main Content: Table + Charts */}
+        {/* Main Content: Ranking + Movimientos */}
         <Tabs defaultValue="ranking" className="space-y-4">
           <TabsList className="bg-white">
             <TabsTrigger value="ranking" className="gap-2">
               <Trophy className="h-4 w-4" />
               Ranking
-            </TabsTrigger>
-            <TabsTrigger value="charts" className="gap-2">
-              <BarChart3 className="h-4 w-4" />
-              Gráficos
-            </TabsTrigger>
-            <TabsTrigger value="distribution" className="gap-2">
-              <PieChartIcon className="h-4 w-4" />
-              Distribución
             </TabsTrigger>
             <TabsTrigger value="movimientos" className="gap-2">
               <List className="h-4 w-4" />
@@ -475,7 +449,7 @@ export default function Dashboard() {
           <TabsContent value="ranking">
             <Card>
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-3">
                   <div>
                     <CardTitle className="text-lg">Ranking de Tiempos Fuera de Depósito</CardTitle>
                     <CardDescription>
@@ -500,10 +474,10 @@ export default function Dashboard() {
                         Por Salidas
                       </button>
                     </div>
+                    <Badge variant="outline" className="text-xs">
+                      Pág. {page} de {totalPages}
+                    </Badge>
                   </div>
-                  <Badge variant="outline" className="text-xs">
-                    Pág. {page} de {totalPages}
-                  </Badge>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -534,7 +508,7 @@ export default function Dashboard() {
                         ))
                       ) : ranking.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-12 text-slate-500">
+                          <TableCell colSpan={8} className="text-center py-12 text-slate-500">
                             No se encontraron registros
                           </TableCell>
                         </TableRow>
@@ -598,88 +572,6 @@ export default function Dashboard() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Bar Chart - Top 10 */}
-          <TabsContent value="charts">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Top 10 - Mayores Tiempos Fuera</CardTitle>
-                  <CardDescription>Empleados con mayor tiempo acumulado fuera de depósito</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {stats && stats.top10.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={400}>
-                      <BarChart data={stats.top10} layout="vertical" margin={{ left: 20, right: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                        <XAxis type="number" tickFormatter={(v) => `${v}h`} />
-                        <YAxis
-                          type="category"
-                          dataKey="nombre"
-                          width={180}
-                          tick={{ fontSize: 11 }}
-                          interval={0}
-                        />
-                        <Tooltip
-                          formatter={(value: number) => [`${value.toFixed(1)} horas`, 'Tiempo Total']}
-                          contentStyle={{ borderRadius: 8, fontSize: 13 }}
-                        />
-                        <Bar dataKey="totalHoras" fill="#ef4444" radius={[0, 4, 4, 0]}>
-                          {stats.top10.map((_, index) => (
-                            <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-[400px] flex items-center justify-center text-slate-400">
-                      Sin datos para mostrar
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Top 10 - Cantidad de Salidas</CardTitle>
-                  <CardDescription>Empleados con mayor cantidad de salidas del depósito</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {stats && stats.top10Salidas && stats.top10Salidas.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={400}>
-                      <BarChart data={stats.top10Salidas} layout="vertical" margin={{ left: 20, right: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                        <XAxis type="number" />
-                        <YAxis
-                          type="category"
-                          dataKey="nombre"
-                          width={180}
-                          tick={{ fontSize: 11 }}
-                          interval={0}
-                        />
-                        <Tooltip
-                          formatter={(value: number, name: string) => [
-                            name === 'salidas' ? `${value} salidas` : `${value.toFixed(1)} horas`,
-                            name === 'salidas' ? 'Cantidad de Salidas' : 'Tiempo Total'
-                          ]}
-                          contentStyle={{ borderRadius: 8, fontSize: 13 }}
-                        />
-                        <Bar dataKey="salidas" fill="#f97316" radius={[0, 4, 4, 0]}>
-                          {stats.top10Salidas.map((_, index) => (
-                            <Cell key={index} fill={COLORS[(index + 3) % COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-[400px] flex items-center justify-center text-slate-400">
-                      Sin datos para mostrar
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           {/* Movimientos Detail + Download */}
@@ -831,96 +723,8 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </TabsContent>
-
-          {/* Distribution Charts */}
-          <TabsContent value="distribution">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Distribución por Sector</CardTitle>
-                  <CardDescription>Horas totales de tiempos fuera por sector</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {stats && stats.bySector.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={400}>
-                      <PieChart>
-                        <Pie
-                          data={stats.bySector}
-                          dataKey="totalHoras"
-                          nameKey="sector"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={140}
-                          label={({ sector, totalHoras }) => `${sector} (${totalHoras.toFixed(1)}h)`}
-                          labelLine={true}
-                          fontSize={11}
-                        >
-                          {stats.bySector.map((_, index) => (
-                            <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value: number) => `${value.toFixed(1)} horas`}
-                          contentStyle={{ borderRadius: 8, fontSize: 13 }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-[400px] flex items-center justify-center text-slate-400">
-                      Sin datos para mostrar
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Distribución por Empresa</CardTitle>
-                  <CardDescription>Horas totales de tiempos fuera por empresa</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {stats && stats.byEmpresa.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={400}>
-                      <PieChart>
-                        <Pie
-                          data={stats.byEmpresa}
-                          dataKey="totalHoras"
-                          nameKey="empresa"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={140}
-                          label={({ empresa, totalHoras }) => `${empresa} (${totalHoras.toFixed(1)}h)`}
-                          labelLine={true}
-                          fontSize={11}
-                        >
-                          {stats.byEmpresa.map((_, index) => (
-                            <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value: number) => `${value.toFixed(1)} horas`}
-                          contentStyle={{ borderRadius: 8, fontSize: 13 }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-[400px] flex items-center justify-center text-slate-400">
-                      Sin datos para mostrar
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
         </Tabs>
       </main>
-
-      {/* Footer */}
-      <footer className="mt-auto border-t bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-4 text-center text-sm text-slate-400">
-          Tiempos Fuera de Depósito — Aplicación de Control y Ranking
-        </div>
-      </footer>
     </div>
   )
 }

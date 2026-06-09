@@ -106,12 +106,18 @@ export async function POST(request: NextRequest) {
           if (evts[j].tipo === 'E') {
             const dur = (evts[j].key - evts[i].key) / 60000;
             if (dur > 0 && dur < 720) {
-              const [hS] = evts[i].hor.split(':').map(Number);
+              const [hS, mS] = evts[i].hor.split(':').map(Number);
               let jd = evts[i].fec;
-              if (evts[i].tur.toLowerCase().startsWith('tn') && hS >= 19) {
-                const d = new Date(evts[i].fec + 'T00:00:00');
-                d.setDate(d.getDate() - 1);
-                jd = d.toISOString().split('T')[0];
+              // TN shift: starts at 23:00, ends at 05:20 next day
+              // Events before 05:20 belong to the previous day's jornada
+              if (evts[i].tur.toLowerCase().startsWith('tn')) {
+                if (hS < 5 || (hS === 5 && mS <= 20)) {
+                  // Before or at 05:20: jornada started yesterday at 23:00
+                  const d = new Date(evts[i].fec + 'T00:00:00');
+                  d.setDate(d.getDate() - 1);
+                  jd = d.toISOString().split('T')[0];
+                }
+                // >= 05:20: keep same date (jornada starts today or continues)
               }
               const esc = (str: string) => str.replace(/'/g, "''");
               allValues.push(
