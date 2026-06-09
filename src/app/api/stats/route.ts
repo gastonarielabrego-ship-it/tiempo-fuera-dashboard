@@ -7,8 +7,8 @@ export const maxDuration = 15;
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const sector = searchParams.get('sector') || '';
-    const empresa = searchParams.get('empresa') || '';
+    const sectors = searchParams.getAll('sector').filter(Boolean);
+    const empresas = searchParams.getAll('empresa').filter(Boolean);
     const fechaDesde = searchParams.get('fechaDesde') || '';
     const fechaHasta = searchParams.get('fechaHasta') || '';
     const turnoTipo = searchParams.get('turnoTipo') || '';
@@ -18,13 +18,15 @@ export async function GET(request: NextRequest) {
     const params: string[] = [];
     let pIdx = 1;
 
-    if (sector) {
-      whereClause += ` AND "sector" = $${pIdx}`;
-      params.push(sector); pIdx++;
+    if (sectors.length > 0) {
+      const placeholders = sectors.map(() => `$${pIdx++}`);
+      whereClause += ` AND "sector" IN (${placeholders.join(',')})`;
+      params.push(...sectors);
     }
-    if (empresa) {
-      whereClause += ` AND "empresa" = $${pIdx}`;
-      params.push(empresa); pIdx++;
+    if (empresas.length > 0) {
+      const placeholders = empresas.map(() => `$${pIdx++}`);
+      whereClause += ` AND "empresa" IN (${placeholders.join(',')})`;
+      params.push(...empresas);
     }
     if (fechaDesde) {
       whereClause += ` AND "fecha" >= $${pIdx}`;
@@ -126,8 +128,10 @@ export async function GET(request: NextRequest) {
       // Fallback: use TiempoFuera
       const { Prisma } = await import('@prisma/client');
       const where: any = {};
-      if (sector) where.sector = sector;
-      if (empresa) where.empresa = empresa;
+      if (sectors.length === 1) where.sector = sectors[0];
+      else if (sectors.length > 1) where.sector = { in: sectors };
+      if (empresas.length === 1) where.empresa = empresas[0];
+      else if (empresas.length > 1) where.empresa = { in: empresas };
       if (fechaDesde || fechaHasta) {
         const f: any = {};
         if (fechaDesde) f.gte = fechaDesde;

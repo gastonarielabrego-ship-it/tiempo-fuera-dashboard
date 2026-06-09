@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,9 +10,12 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Upload, Clock, Users, TrendingUp, Search, Trophy,
-  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
 
 interface RankingItem {
   ranking: number
@@ -110,8 +113,8 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState(false)
 
   // Filter state
-  const [sectorFilter, setSectorFilter] = useState('')
-  const [empresaFilter, setEmpresaFilter] = useState('')
+  const [sectorFilter, setSectorFilter] = useState<string[]>([])
+  const [empresaFilter, setEmpresaFilter] = useState<string[]>([])
   const [turnoFilter, setTurnoFilter] = useState('')
   const [search, setSearch] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
@@ -125,8 +128,8 @@ export default function Dashboard() {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (sectorFilter) params.set('sector', sectorFilter)
-      if (empresaFilter) params.set('empresa', empresaFilter)
+      sectorFilter.forEach(s => params.append('sector', s))
+      empresaFilter.forEach(e => params.append('empresa', e))
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
       if (search) params.set('search', search)
       if (sortBy) params.set('sortBy', sortBy)
@@ -151,8 +154,8 @@ export default function Dashboard() {
   const fetchStats = useCallback(async () => {
     try {
       const params = new URLSearchParams()
-      if (sectorFilter) params.set('sector', sectorFilter)
-      if (empresaFilter) params.set('empresa', empresaFilter)
+      sectorFilter.forEach(s => params.append('sector', s))
+      empresaFilter.forEach(e => params.append('empresa', e))
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
       if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
       if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
@@ -211,8 +214,8 @@ export default function Dashboard() {
   }
 
   const clearFilters = () => {
-    setSectorFilter('')
-    setEmpresaFilter('')
+    setSectorFilter([])
+    setEmpresaFilter([])
     setTurnoFilter('')
     setSearch('')
     setFechaDesde('')
@@ -358,7 +361,7 @@ export default function Dashboard() {
     }
   }
 
-  const hasFilters = sectorFilter || empresaFilter || turnoFilter || search || fechaDesde || fechaHasta
+  const hasFilters = sectorFilter.length > 0 || empresaFilter.length > 0 || turnoFilter || search || fechaDesde || fechaHasta
 
   const fechasCargadas = movUniqueDates.length > 0 ? movUniqueDates.sort().map(formatDateDisplay) : []
 
@@ -523,31 +526,73 @@ export default function Dashboard() {
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1 block">Sector</label>
-                <Select value={sectorFilter} onValueChange={(v) => setSectorFilter(v === '__all__' ? '' : v)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Todos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">Todos</SelectItem>
-                    {filters.sectores.map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-9 w-full justify-between text-left font-normal">
+                      <span className="truncate">
+                        {sectorFilter.length === 0 ? 'Todos' : `${sectorFilter.length} seleccionado(s)`}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 p-0" align="start">
+                    <div className="p-2 border-b flex items-center justify-between">
+                      <span className="text-xs font-medium text-slate-500">Sectores ({filters.sectores.length})</span>
+                      {sectorFilter.length > 0 && (
+                        <button onClick={() => setSectorFilter([])} className="text-xs text-slate-400 hover:text-slate-600">Limpiar</button>
+                      )}
+                    </div>
+                    <div className="max-h-48 overflow-y-auto p-1">
+                      {filters.sectores.map((s) => (
+                        <label key={s} className="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-slate-50 cursor-pointer text-sm">
+                          <Checkbox
+                            checked={sectorFilter.includes(s)}
+                            onCheckedChange={(checked) => {
+                              if (checked) setSectorFilter([...sectorFilter, s])
+                              else setSectorFilter(sectorFilter.filter(x => x !== s))
+                            }}
+                          />
+                          <span>{s}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1 block">Empresa</label>
-                <Select value={empresaFilter} onValueChange={(v) => setEmpresaFilter(v === '__all__' ? '' : v)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Todas" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">Todas</SelectItem>
-                    {filters.empresas.map((e) => (
-                      <SelectItem key={e} value={e}>{e}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-9 w-full justify-between text-left font-normal">
+                      <span className="truncate">
+                        {empresaFilter.length === 0 ? 'Todas' : `${empresaFilter.length} seleccionada(s)`}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 p-0" align="start">
+                    <div className="p-2 border-b flex items-center justify-between">
+                      <span className="text-xs font-medium text-slate-500">Empresas ({filters.empresas.length})</span>
+                      {empresaFilter.length > 0 && (
+                        <button onClick={() => setEmpresaFilter([])} className="text-xs text-slate-400 hover:text-slate-600">Limpiar</button>
+                      )}
+                    </div>
+                    <div className="max-h-48 overflow-y-auto p-1">
+                      {filters.empresas.map((e) => (
+                        <label key={e} className="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-slate-50 cursor-pointer text-sm">
+                          <Checkbox
+                            checked={empresaFilter.includes(e)}
+                            onCheckedChange={(checked) => {
+                              if (checked) setEmpresaFilter([...empresaFilter, e])
+                              else setEmpresaFilter(empresaFilter.filter(x => x !== e))
+                            }}
+                          />
+                          <span>{e}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1 block">Turno</label>
