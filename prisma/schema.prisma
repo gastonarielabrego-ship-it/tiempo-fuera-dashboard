@@ -26,3 +26,18 @@ model TiempoFuera {
   @@index([empresa])
   @@index([jornadaDate])
 }
+
+model AnomaliaEvento {
+  id       String   @id @default(cuid())
+  legajo   String
+  nombre   String
+  fecha    String
+  hora     String
+  tipo     String
+  turno    String
+  sector   String
+  empresa  String
+  createdAt DateTime @default(now())
+
+  @@index([legajo, fecha])
+}

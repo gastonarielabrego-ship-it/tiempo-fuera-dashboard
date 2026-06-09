@@ -10,11 +10,9 @@ function toDate(d: any): string {
     return isNaN(d.getTime()) ? String(d) : d.toISOString().split('T')[0];
   }
   if (typeof d === 'number') {
-    // Excel serial date number
     return new Date(new Date(1899, 11, 30).getTime() + d * 86400000).toISOString().split('T')[0];
   }
   if (typeof d === 'string') {
-    // Try to parse as number first (xlsx might return stringified numbers)
     const num = Number(d);
     if (!isNaN(num) && d.trim() !== '') {
       return new Date(new Date(1899, 11, 30).getTime() + num * 86400000).toISOString().split('T')[0];
@@ -94,12 +92,18 @@ export async function POST(request: NextRequest) {
     const totalEvents = Array.from(map.values()).flat().length;
     console.log(`Upload: ${map.size} employees, ${totalEvents} events`);
 
-    // Pair Salida → Entrada
+    // Pair Salida → Entrada + detect unpaired
     const { randomUUID } = await import('crypto');
     const allValues: string[] = [];
+    const anomaliaValues: string[] = [];
+    const pairedIndices = new Set<number>();
 
     for (const [legajo, evts] of map) {
       evts.sort((a: any, b: any) => a.key - b.key);
+
+      // Track which event indices get paired
+      const localPaired = new Set<number>();
+
       for (let i = 0; i < evts.length; i++) {
         if (evts[i].tipo !== 'S') continue;
         for (let j = i + 1; j < evts.length; j++) {
@@ -109,52 +113,96 @@ export async function POST(request: NextRequest) {
               const [hS, mS] = evts[i].hor.split(':').map(Number);
               let jd = evts[i].fec;
               // TN shift: starts at 23:00, ends at 05:20 next day
-              // Events before 05:20 belong to the previous day's jornada
               if (evts[i].tur.toLowerCase().startsWith('tn')) {
                 if (hS < 5 || (hS === 5 && mS <= 20)) {
-                  // Before or at 05:20: jornada started yesterday at 23:00
                   const d = new Date(evts[i].fec + 'T00:00:00');
                   d.setDate(d.getDate() - 1);
                   jd = d.toISOString().split('T')[0];
                 }
-                // >= 05:20: keep same date (jornada starts today or continues)
               }
               const esc = (str: string) => str.replace(/'/g, "''");
               allValues.push(
                 `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i].nom)}', '${evts[i].fec}', '${jd}', '${evts[i].hor}', '${evts[j].hor}', ${Math.round(dur * 100) / 100}, '${esc(evts[i].tur)}', '${esc(evts[i].sec)}', '${esc(evts[i].emp)}')`
               );
+              localPaired.add(i);
+              localPaired.add(j);
             }
             break;
           }
         }
       }
+
+      // Find unpaired events
+      for (let i = 0; i < evts.length; i++) {
+        if (localPaired.has(i)) continue;
+        const ev = evts[i];
+        const tipoDesc = ev.tipo === 'S' ? 'Salida sin Entrada' : 'Entrada sin Salida';
+        const esc = (str: string) => str.replace(/'/g, "''");
+        anomaliaValues.push(
+          `('${randomUUID()}', '${esc(legajo)}', '${esc(ev.nom)}', '${ev.fec}', '${ev.hor}', '${tipoDesc}', '${esc(ev.tur)}', '${esc(ev.sec)}', '${esc(ev.emp)}')`
+        );
+      }
     }
 
-    if (!allValues.length) {
+    if (!allValues.length && !anomaliaValues.length) {
       return NextResponse.json({
-        error: `No se encontraron pares salida/entrada (${rows.length} filas, ${map.size} empleados, ${totalEvents} eventos)`
+        error: `No se encontraron pares salida/entrada ni anomalías (${rows.length} filas, ${map.size} empleados, ${totalEvents} eventos)`
       }, { status: 400 });
     }
 
-    console.log(`Upload: ${allValues.length} pairs, inserting to DB...`);
+    console.log(`Upload: ${allValues.length} pairs, ${anomaliaValues.length} anomalies, inserting to DB...`);
+
+    // Ensure AnomaliaEvento table exists
+    try {
+      await db.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "AnomaliaEvento" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "legajo" TEXT NOT NULL,
+          "nombre" TEXT NOT NULL,
+          "fecha" TEXT NOT NULL,
+          "hora" TEXT NOT NULL,
+          "tipo" TEXT NOT NULL,
+          "turno" TEXT NOT NULL,
+          "sector" TEXT NOT NULL,
+          "empresa" TEXT NOT NULL,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (e) {
+      console.log('AnomaliaEvento table already exists or created');
+    }
 
     await db.$executeRawUnsafe(`DELETE FROM "TiempoFuera"`);
+    await db.$executeRawUnsafe(`DELETE FROM "AnomaliaEvento"`);
 
     const batchSize = 2000;
-    for (let i = 0; i < allValues.length; i += batchSize) {
-      const batch = allValues.slice(i, i + batchSize);
-      await db.$executeRawUnsafe(
-        `INSERT INTO "TiempoFuera" (id, legajo, nombre, fecha, "jornadaDate", "horaSalida", "horaEntrada", "duracionMinutos", turno, sector, empresa) VALUES ${batch.join(',')}`
-      );
+    if (allValues.length > 0) {
+      for (let i = 0; i < allValues.length; i += batchSize) {
+        const batch = allValues.slice(i, i + batchSize);
+        await db.$executeRawUnsafe(
+          `INSERT INTO "TiempoFuera" (id, legajo, nombre, fecha, "jornadaDate", "horaSalida", "horaEntrada", "duracionMinutos", turno, sector, empresa) VALUES ${batch.join(',')}`
+        );
+      }
+    }
+
+    if (anomaliaValues.length > 0) {
+      for (let i = 0; i < anomaliaValues.length; i += batchSize) {
+        const batch = anomaliaValues.slice(i, i + batchSize);
+        await db.$executeRawUnsafe(
+          `INSERT INTO "AnomaliaEvento" (id, legajo, nombre, fecha, hora, tipo, turno, sector, empresa) VALUES ${batch.join(',')}`
+        );
+      }
     }
 
     const verifyCount = await db.tiempoFuera.count();
-    console.log(`Upload: done, ${verifyCount} records`);
+    const anomaliaCount = await db.$executeRawUnsafe(`SELECT COUNT(*)::int FROM "AnomaliaEvento"`) as any;
+    console.log(`Upload: done, ${verifyCount} records, ${anomaliaCount.count} anomalies`);
 
     return NextResponse.json({
       success: true,
       rowsProcessed: rows.length,
       sessionsInserted: allValues.length,
+      anomalías: anomaliaValues.length,
       verifyCount,
     });
   } catch (error) {

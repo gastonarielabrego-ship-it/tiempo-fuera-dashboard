@@ -9,8 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  Upload, Clock, Users, TrendingUp, Search, Trophy, FileSpreadsheet,
-  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays
+  Upload, Clock, Users, TrendingUp, Search, Trophy,
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -43,6 +43,18 @@ interface MovementItem {
   sector: string
   empresa: string
   duracionMinutos?: number
+}
+
+interface AnomaliaItem {
+  id: string
+  legajo: string
+  nombre: string
+  fecha: string
+  hora: string
+  tipo: string
+  turno: string
+  sector: string
+  empresa: string
 }
 
 interface FilterData {
@@ -85,11 +97,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
 
-  // Filter state
+  // Filter state (sin "Desde")
   const [sectorFilter, setSectorFilter] = useState('')
   const [empresaFilter, setEmpresaFilter] = useState('')
   const [turnoFilter, setTurnoFilter] = useState('')
-  const [fechaDesde, setFechaDesde] = useState('')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'tiempo' | 'salidas'>('tiempo')
   const [page, setPage] = useState(1)
@@ -103,7 +114,6 @@ export default function Dashboard() {
       if (sectorFilter) params.set('sector', sectorFilter)
       if (empresaFilter) params.set('empresa', empresaFilter)
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
-      if (fechaDesde) params.set('fechaDesde', fechaDesde)
       if (search) params.set('search', search)
       if (sortBy) params.set('sortBy', sortBy)
       params.set('page', String(page))
@@ -120,7 +130,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde, search, sortBy, page])
+  }, [sectorFilter, empresaFilter, turnoFilter, search, sortBy, page])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -128,7 +138,6 @@ export default function Dashboard() {
       if (sectorFilter) params.set('sector', sectorFilter)
       if (empresaFilter) params.set('empresa', empresaFilter)
       if (turnoFilter) params.set('turnoTipo', turnoFilter)
-      if (fechaDesde) params.set('fechaDesde', fechaDesde)
 
       const res = await fetch(`/api/stats?${params}`)
       const data = await res.json()
@@ -136,17 +145,16 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Error fetching stats:', err)
     }
-  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde])
+  }, [sectorFilter, empresaFilter, turnoFilter])
 
   useEffect(() => {
     fetchRanking()
     fetchStats()
   }, [fetchRanking, fetchStats])
 
-  // Reset page on filter change
   useEffect(() => {
     setPage(1)
-  }, [sectorFilter, empresaFilter, fechaDesde, search])
+  }, [sectorFilter, empresaFilter, search])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -166,9 +174,13 @@ export default function Dashboard() {
       const data = await res.json()
 
       if (res.ok) {
-        toast.success(`${data.sessionsInserted} sesiones cargadas (${data.rowsProcessed} filas procesadas)`)
+        const extraMsg = data.anomalías > 0 ? ` | ${data.anomalías} inconsistencia(s) detectada(s)` : ''
+        toast.success(`${data.sessionsInserted} sesiones cargadas (${data.rowsProcessed} filas)${extraMsg}`)
         fetchRanking()
         fetchStats()
+        // Auto-fetch movements and anomalies after upload
+        fetchAllMovements()
+        fetchAnomalies()
       } else {
         toast.error(`Error: ${data.error}`)
       }
@@ -185,26 +197,38 @@ export default function Dashboard() {
     setSectorFilter('')
     setEmpresaFilter('')
     setTurnoFilter('')
-    setFechaDesde('')
     setSearch('')
   }
 
-  // Movements state
-  const [movNombre, setMovNombre] = useState('')
-  const [movFecha, setMovFecha] = useState('')
+  // Movements state - carga todos al inicio
   const [movements, setMovements] = useState<MovementItem[]>([])
   const [movLoading, setMovLoading] = useState(false)
-  const [movSearched, setMovSearched] = useState(false)
   const [movAutoNames, setMovAutoNames] = useState<string[]>([])
+  const [movUniqueDates, setMovUniqueDates] = useState<string[]>([])
+
+  // Movements filter (optional)
+  const [movNombre, setMovNombre] = useState('')
+  const [movFecha, setMovFecha] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const fetchMovements = useCallback(async () => {
-    if (!movNombre && !movFecha) {
-      toast.error('Ingresá un nombre o seleccioná una fecha')
-      return
-    }
+  const fetchAllMovements = useCallback(async () => {
     setMovLoading(true)
-    setMovSearched(true)
+    try {
+      const res = await fetch('/api/movements')
+      const data = await res.json()
+      setMovements(data.movements)
+      setMovAutoNames(data.uniqueNames || [])
+      setMovUniqueDates(data.uniqueDates || [])
+    } catch (err) {
+      console.error('Error fetching movements:', err)
+    } finally {
+      setMovLoading(false)
+    }
+  }, [])
+
+  // Fetch filtered movements
+  const fetchFilteredMovements = useCallback(async () => {
+    setMovLoading(true)
     try {
       const params = new URLSearchParams()
       if (movNombre) params.set('nombre', movNombre)
@@ -213,12 +237,50 @@ export default function Dashboard() {
       const data = await res.json()
       setMovements(data.movements)
       setMovAutoNames(data.uniqueNames || [])
+      setMovUniqueDates(data.uniqueDates || [])
     } catch (err) {
       toast.error('Error al buscar movimientos')
     } finally {
       setMovLoading(false)
     }
   }, [movNombre, movFecha])
+
+  // Load all movements on first render if data exists
+  useEffect(() => {
+    if (filters.fechaMin) {
+      fetchAllMovements()
+    }
+  }, [filters.fechaMin, fetchAllMovements])
+
+  // Anomalies state
+  const [anomalies, setAnomalies] = useState<AnomaliaItem[]>([])
+  const [anomLoading, setAnomLoading] = useState(false)
+  const [anomUniqueDates, setAnomUniqueDates] = useState<string[]>([])
+  const [anomFecha, setAnomFecha] = useState('')
+  const [anomSearch, setAnomSearch] = useState('')
+
+  const fetchAnomalies = useCallback(async () => {
+    setAnomLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (anomSearch) params.set('search', anomSearch)
+      if (anomFecha) params.set('fecha', anomFecha)
+      const res = await fetch(`/api/anomalies?${params}`)
+      const data = await res.json()
+      setAnomalies(data.anomalies)
+      setAnomUniqueDates(data.uniqueDates || [])
+    } catch (err) {
+      console.error('Error fetching anomalies:', err)
+    } finally {
+      setAnomLoading(false)
+    }
+  }, [anomSearch, anomFecha])
+
+  useEffect(() => {
+    if (filters.fechaMin) {
+      fetchAnomalies()
+    }
+  }, [filters.fechaMin, fetchAnomalies])
 
   const downloadMovementsCSV = () => {
     if (!movements || movements.length === 0) return
@@ -241,7 +303,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(blob)
       const link = window.document.createElement('a')
       link.href = url
-      link.download = `movimientos_${movNombre || 'todos'}_${movFecha || 'todas'}.csv`
+      link.download = `movimientos_todos.csv`
       window.document.body.appendChild(link)
       link.click()
       window.document.body.removeChild(link)
@@ -253,16 +315,49 @@ export default function Dashboard() {
     }
   }
 
-  const hasFilters = sectorFilter || empresaFilter || turnoFilter || fechaDesde || search
+  const downloadAnomaliesCSV = () => {
+    if (!anomalies || anomalies.length === 0) return
+    try {
+      const BOM = '\uFEFF'
+      const headers = ['Tipo Anomalia', 'Legajo', 'Nombre', 'Fecha', 'Hora', 'Turno', 'Sector', 'Empresa']
+      const rows = anomalies.map(a => [
+        a.tipo,
+        a.legajo,
+        a.nombre,
+        a.fecha,
+        a.hora,
+        a.turno,
+        a.sector,
+        a.empresa,
+      ])
+      const csvContent = BOM + [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = window.document.createElement('a')
+      link.href = url
+      link.download = `inconsistencias.csv`
+      window.document.body.appendChild(link)
+      link.click()
+      window.document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      toast.success('Archivo CSV descargado')
+    } catch (err) {
+      console.error('Download error:', err)
+      toast.error('Error al descargar')
+    }
+  }
 
-  // Determine date range to show
-  const fechaRango = filters.fechaMin && filters.fechaMax && filters.fechaMin === filters.fechaMax
-    ? formatDateDisplay(filters.fechaMin)
-    : (filters.fechaMin && filters.fechaMax)
-      ? `${formatDateDisplay(filters.fechaMin)} - ${formatDateDisplay(filters.fechaMax)}`
-      : filters.fechaMin
-        ? `Desde ${formatDateDisplay(filters.fechaMin)}`
-        : ''
+  const hasFilters = sectorFilter || empresaFilter || turnoFilter || search
+
+  // Fechas cargadas para mostrar en header
+  const fechasCargadas = movUniqueDates.length > 0 ? movUniqueDates.sort().map(formatDateDisplay) : []
+
+  // Filter movements locally when filters are active
+  const filteredMovements = movements.filter(m => {
+    if (movNombre && !m.nombre.toLowerCase().includes(movNombre.toLowerCase()) && !m.legajo.includes(movNombre)) return false
+    if (movFecha && m.fecha !== movFecha) return false
+    return true
+  })
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -279,13 +374,6 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Loaded date badge */}
-            {fechaRango && (
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 px-3 py-1.5 rounded-lg">
-                <CalendarDays className="h-4 w-4" />
-                <span className="text-sm font-medium">{fechaRango}</span>
-              </div>
-            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -348,10 +436,38 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Filters */}
+        {/* Fechas cargadas */}
+        {fechasCargadas.length > 0 && (
+          <Card className="border-l-4 border-l-blue-500">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <CalendarDays className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="text-sm font-medium text-slate-700">
+                    {fechasCargadas.length === 1
+                      ? `Fecha cargada: ${fechasCargadas[0]}`
+                      : `Fechas cargadas (${fechasCargadas.length}):`
+                    }
+                  </p>
+                  {fechasCargadas.length > 1 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {fechasCargadas.map(f => (
+                        <Badge key={f} variant="secondary" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                          {f}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Filters - sin "Desde", sin MM */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 items-end">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar</label>
                 <div className="relative">
@@ -392,33 +508,21 @@ export default function Dashboard() {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">Turno</label>
-                <Select value={turnoFilter} onValueChange={(v) => setTurnoFilter(v === '__all__' ? '' : v)}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Todos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">Todos</SelectItem>
-                    <SelectItem value="TM">TM - Mañana</SelectItem>
-                    <SelectItem value="TT">TT - Tarde</SelectItem>
-                    <SelectItem value="TN">TN - Noche</SelectItem>
-                    <SelectItem value="MM">MM - Media</SelectItem>
-                    <SelectItem value="Descanso">Descanso</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">Desde</label>
-                  <Input
-                    type="date"
-                    value={fechaDesde}
-                    onChange={(e) => setFechaDesde(e.target.value)}
-                    className="h-9"
-                    min={filters.fechaMin}
-                    max={filters.fechaMax}
-                  />
+                  <label className="text-xs font-medium text-slate-500 mb-1 block">Turno</label>
+                  <Select value={turnoFilter} onValueChange={(v) => setTurnoFilter(v === '__all__' ? '' : v)}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Todos</SelectItem>
+                      <SelectItem value="TM">TM - Mañana</SelectItem>
+                      <SelectItem value="TT">TT - Tarde</SelectItem>
+                      <SelectItem value="TN">TN - Noche</SelectItem>
+                      <SelectItem value="Descanso">Descanso</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex items-end">
                   {hasFilters && (
@@ -432,7 +536,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Main Content: Ranking + Movimientos */}
+        {/* Main Content: Ranking + Movimientos + Inconsistencias */}
         <Tabs defaultValue="ranking" className="space-y-4">
           <TabsList className="bg-white">
             <TabsTrigger value="ranking" className="gap-2">
@@ -442,6 +546,16 @@ export default function Dashboard() {
             <TabsTrigger value="movimientos" className="gap-2">
               <List className="h-4 w-4" />
               Movimientos
+              {anomalies.length > 0 && (
+                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{anomalies.length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="inconsistencias" className="gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Inconsistencias
+              {anomalies.length > 0 && (
+                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{anomalies.length}</Badge>
+              )}
             </TabsTrigger>
           </TabsList>
 
@@ -544,27 +658,16 @@ export default function Dashboard() {
                   </Table>
                 </div>
 
-                {/* Pagination */}
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between px-4 py-3 border-t">
                     <p className="text-sm text-slate-500">
                       Mostrando {(page - 1) * 25 + 1} a {Math.min(page * 25, totalItems)} de {totalItems}
                     </p>
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={page <= 1}
-                        onClick={() => setPage(page - 1)}
-                      >
+                      <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
                         Anterior
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={page >= totalPages}
-                        onClick={() => setPage(page + 1)}
-                      >
+                      <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
                         Siguiente
                       </Button>
                     </div>
@@ -574,7 +677,7 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          {/* Movimientos Detail + Download */}
+          {/* Movimientos - carga TODOS al entrar */}
           <TabsContent value="movimientos">
             <Card>
               <CardHeader className="pb-3">
@@ -582,123 +685,59 @@ export default function Dashboard() {
                   <div>
                     <CardTitle className="text-lg flex items-center gap-2">
                       <ArrowRightLeft className="h-5 w-5" />
-                      Movimientos por Empleado y Fecha
+                      Todos los Movimientos
                     </CardTitle>
                     <CardDescription>
-                      Buscá los ingresos y egresos individuales por nombre y fecha
+                      Egresos e ingresos de todos los empleados. {filteredMovements.length} registros.
                     </CardDescription>
                   </div>
-                    <Button size="sm" className="gap-2" onClick={downloadMovementsCSV} disabled={!movements || movements.length === 0}>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="gap-2" onClick={downloadMovementsCSV} disabled={!movements || movements.length === 0}>
                       <ArrowDownToLine className="h-4 w-4" />
-                      Descargar CSV
+                      CSV
                     </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Search controls */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                {/* Filter controls */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
                   <div>
-                    <label className="text-xs font-medium text-slate-500 mb-1 block">Nombre o Legajo</label>
+                    <label className="text-xs font-medium text-slate-500 mb-1 block">Filtrar por Nombre/Legajo</label>
                     <Input
-                      placeholder="Ej: ROLON, RAMON"
+                      placeholder="Todos"
                       value={movNombre}
                       onChange={(e) => setMovNombre(e.target.value)}
                       className="h-9"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-500 mb-1 block">Fecha</label>
-                    <Input
-                      type="date"
-                      value={movFecha}
-                      onChange={(e) => setMovFecha(e.target.value)}
-                      className="h-9"
-                    />
+                    <label className="text-xs font-medium text-slate-500 mb-1 block">Filtrar por Fecha</label>
+                    <Select value={movFecha || '__all__'} onValueChange={(v) => setMovFecha(v === '__all__' ? '' : v)}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Todas" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">Todas las fechas</SelectItem>
+                        {movUniqueDates.map((d) => (
+                          <SelectItem key={d} value={d}>{formatDateDisplay(d)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <Button className="gap-2 h-9" onClick={fetchMovements} disabled={movLoading}>
-                    {movLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                    Buscar
-                  </Button>
-                </div>
-
-                {/* Results summary */}
-                {movSearched && !movLoading && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Badge variant="outline">
-                      {movements.length} movimiento{movements.length !== 1 ? 's' : ''} encontrado{movements.length !== 1 ? 's' : ''}
-                    </Badge>
-                    {movNombre && <Badge variant="secondary">{movNombre}</Badge>}
-                    {movFecha && <Badge variant="secondary">{movFecha}</Badge>}
+                  <div className="flex items-end">
+                    <Button className="gap-2 h-9" onClick={fetchFilteredMovements} disabled={movLoading}>
+                      {movLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                      Filtrar
+                    </Button>
                   </div>
-                )}
-
-                {/* Movements table */}
-                <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-white z-10">
-                      <TableRow className="bg-slate-50">
-                        <TableHead className="w-28">Tipo</TableHead>
-                        <TableHead className="w-20">Legajo</TableHead>
-                        <TableHead>Nombre</TableHead>
-                        <TableHead className="w-24">Fecha</TableHead>
-                        <TableHead className="w-20 text-center">Hora</TableHead>
-                        <TableHead className="w-24 text-right">Duración</TableHead>
-                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
-                        <TableHead className="hidden md:table-cell">Sector</TableHead>
-                        <TableHead className="hidden xl:table-cell">Empresa</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {movLoading ? (
-                        Array.from({ length: 8 }).map((_, i) => (
-                          <TableRow key={i}>
-                            {Array.from({ length: 9 }).map((_, j) => (
-                              <TableCell key={j}>
-                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))
-                      ) : movements.length === 0 && movSearched ? (
-                        <TableRow>
-                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
-                            No se encontraron movimientos para esa búsqueda
-                          </TableCell>
-                        </TableRow>
-                      ) : !movSearched ? (
-                        <TableRow>
-                          <TableCell colSpan={9} className="text-center py-12 text-slate-400">
-                            Ingresá un nombre o seleccioná una fecha para buscar movimientos
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        movements.map((m, idx) => (
-                          <TableRow
-                            key={`${m.legajo}-${m.fecha}-${m.hora}-${m.tipo}-${idx}`}
-                            className={m.tipo === 'Salida Depo' ? 'bg-red-50/50' : 'bg-green-50/50'}
-                          >
-                            <TableCell>
-                              <Badge variant={m.tipo === 'Salida Depo' ? 'destructive' : 'default'} className="text-xs">
-                                {m.tipo === 'Salida Depo' ? 'Egreso' : 'Ingreso'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">{m.legajo}</TableCell>
-                            <TableCell className="font-medium text-sm">{m.nombre}</TableCell>
-                            <TableCell className="text-sm">{m.fecha}</TableCell>
-                            <TableCell className="text-center font-mono text-sm">{m.hora}</TableCell>
-                            <TableCell className="text-right text-sm">
-                              {m.duracionMinutos ? formatDuration(m.duracionMinutos) : '-'}
-                            </TableCell>
-                            <TableCell className="hidden lg:table-cell text-xs text-slate-500" title={m.turno}>
-                              {m.turno.length > 20 ? m.turno.substring(0, 20) + '...' : m.turno}
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell text-sm">{m.sector}</TableCell>
-                            <TableCell className="hidden xl:table-cell text-sm">{m.empresa}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
+                  <div className="flex items-end">
+                    {(movNombre || movFecha) && (
+                      <Button variant="ghost" size="sm" onClick={() => { setMovNombre(''); setMovFecha(''); fetchAllMovements() }} className="h-9 text-slate-500">
+                        Ver todos
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Auto-suggest names */}
@@ -720,6 +759,184 @@ export default function Dashboard() {
                       ))}
                   </div>
                 )}
+
+                {/* Movements table */}
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-md border">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="w-28">Tipo</TableHead>
+                        <TableHead className="w-20">Legajo</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-28">Fecha</TableHead>
+                        <TableHead className="w-20 text-center">Hora</TableHead>
+                        <TableHead className="w-24 text-right">Duración</TableHead>
+                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
+                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+                        <TableHead className="hidden xl:table-cell">Empresa</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {movLoading ? (
+                        Array.from({ length: 8 }).map((_, i) => (
+                          <TableRow key={i}>
+                            {Array.from({ length: 9 }).map((_, j) => (
+                              <TableCell key={j}>
+                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : filteredMovements.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+                            No hay movimientos cargados. Subí un archivo Excel para comenzar.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredMovements.map((m, idx) => (
+                          <TableRow
+                            key={`${m.legajo}-${m.fecha}-${m.hora}-${m.tipo}-${idx}`}
+                            className={m.tipo === 'Salida Depo' ? 'bg-red-50/50' : 'bg-green-50/50'}
+                          >
+                            <TableCell>
+                              <Badge variant={m.tipo === 'Salida Depo' ? 'destructive' : 'default'} className="text-xs">
+                                {m.tipo === 'Salida Depo' ? 'Egreso' : 'Ingreso'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">{m.legajo}</TableCell>
+                            <TableCell className="font-medium text-sm">{m.nombre}</TableCell>
+                            <TableCell className="text-sm">{formatDateDisplay(m.fecha)}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{m.hora}</TableCell>
+                            <TableCell className="text-right text-sm">
+                              {m.duracionMinutos ? formatDuration(m.duracionMinutos) : '-'}
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell text-xs text-slate-500" title={m.turno}>
+                              {m.turno.length > 20 ? m.turno.substring(0, 20) + '...' : m.turno}
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-sm">{m.sector}</TableCell>
+                            <TableCell className="hidden xl:table-cell text-sm">{m.empresa}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Inconsistencias - salidas sin entrada, entradas sin salida */}
+          <TabsContent value="inconsistencias">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      Inconsistencias
+                    </CardTitle>
+                    <CardDescription>
+                      Registros con salidas sin entrada o entradas sin salida. {anomalies.length} encontradas.
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="gap-2" onClick={downloadAnomaliesCSV} disabled={anomalies.length === 0}>
+                      <ArrowDownToLine className="h-4 w-4" />
+                      CSV
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-2" onClick={fetchAnomalies}>
+                      <RefreshCw className="h-4 w-4" />
+                      Actualizar
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Filters */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar Nombre/Legajo</label>
+                    <Input
+                      placeholder="Todos"
+                      value={anomSearch}
+                      onChange={(e) => setAnomSearch(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 mb-1 block">Fecha</label>
+                    <Select value={anomFecha || '__all__'} onValueChange={(v) => setAnomFecha(v === '__all__' ? '' : v)}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Todas" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">Todas</SelectItem>
+                        {anomUniqueDates.map((d) => (
+                          <SelectItem key={d} value={d}>{formatDateDisplay(d)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button className="gap-2 h-9" onClick={fetchAnomalies} disabled={anomLoading}>
+                    {anomLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Filtrar
+                  </Button>
+                </div>
+
+                {/* Anomalies table */}
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="bg-amber-50">
+                        <TableHead className="w-40">Tipo</TableHead>
+                        <TableHead className="w-20">Legajo</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-28">Fecha</TableHead>
+                        <TableHead className="w-20 text-center">Hora</TableHead>
+                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
+                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+                        <TableHead className="hidden xl:table-cell">Empresa</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {anomLoading ? (
+                        Array.from({ length: 5 }).map((_, i) => (
+                          <TableRow key={i}>
+                            {Array.from({ length: 8 }).map((_, j) => (
+                              <TableCell key={j}>
+                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : anomalies.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-12 text-slate-500">
+                            No se encontraron inconsistencias
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        anomalies.map((a, idx) => (
+                          <TableRow key={a.id || idx} className="bg-amber-50/50">
+                            <TableCell>
+                              <Badge variant="outline" className="text-xs bg-amber-100 text-amber-800 border-amber-300">
+                                {a.tipo}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">{a.legajo}</TableCell>
+                            <TableCell className="font-medium text-sm">{a.nombre}</TableCell>
+                            <TableCell className="text-sm">{formatDateDisplay(a.fecha)}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{a.hora}</TableCell>
+                            <TableCell className="hidden lg:table-cell text-xs text-slate-500">{a.turno}</TableCell>
+                            <TableCell className="hidden md:table-cell text-sm">{a.sector}</TableCell>
+                            <TableCell className="hidden xl:table-cell text-sm">{a.empresa}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

@@ -7,10 +7,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const nombre = searchParams.get('nombre') || '';
     const fecha = searchParams.get('fecha') || '';
-
-    if (!nombre && !fecha) {
-      return NextResponse.json({ error: 'Se requiere nombre o fecha' }, { status: 400 });
-    }
+    const page = parseInt(searchParams.get('page') || '1');
+    const pageSize = parseInt(searchParams.get('pageSize') || '200');
 
     const where: Prisma.TiempoFueraWhereInput = {};
     if (nombre) {
@@ -69,7 +67,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Sort by fecha, then by hora
+    // Sort by fecha desc, then legajo, then hora
     movements.sort((a, b) => {
       if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
       if (a.legajo !== b.legajo) return a.legajo.localeCompare(b.legajo);
