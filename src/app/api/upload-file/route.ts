@@ -116,37 +116,42 @@ export async function POST(request: NextRequest) {
 
       // Pair Salida → Entrada for ranking (TiempoFuera)
       // Limite 1440 min (24h) para cubrir turnos TN largos (18:00→06:00)
+      // Un evento emparejado NO puede reutilizarse en otro par
       for (let i = 0; i < evts.length; i++) {
         if (evts[i].tipo !== 'S') continue;
+        if (localPaired.has(i)) continue; // Saltar Salida ya emparejada
+
         for (let j = i + 1; j < evts.length; j++) {
-          if (evts[j].tipo === 'E') {
-            const dur = (evts[j].key - evts[i].key) / 60000;
-            if (dur > 0 && dur < 1440) {
-              const [hS, mS] = evts[i].hor.split(':').map(Number);
-              let jd = evts[i].fec;
+          if (evts[j].tipo !== 'E') continue;
+          if (localPaired.has(j)) continue; // Saltar Entrada ya emparejada, seguir buscando
 
-              // TN shift: jornada del dia que inicia el turno
-              // Si sale de madrugada (00:00-05:59), la jornada es del dia anterior
-              // Si sale desde la tarde/noche (06:00+), la jornada es ese dia
-              if (evts[i].tur.toLowerCase().startsWith('tn')) {
-                if (hS < 6) {
-                  const d = new Date(evts[i].fec + 'T00:00:00');
-                  d.setDate(d.getDate() - 1);
-                  jd = d.toISOString().split('T')[0];
-                }
+          const dur = (evts[j].key - evts[i].key) / 60000;
+          if (dur > 0 && dur < 1440) {
+            const [hS, mS] = evts[i].hor.split(':').map(Number);
+            let jd = evts[i].fec;
+
+            // TN shift: jornada del dia que inicia el turno
+            // Si sale de madrugada (00:00-05:59), la jornada es del dia anterior
+            // Si sale desde la tarde/noche (06:00+), la jornada es ese dia
+            if (evts[i].tur.toLowerCase().startsWith('tn')) {
+              if (hS < 6) {
+                const d = new Date(evts[i].fec + 'T00:00:00');
+                d.setDate(d.getDate() - 1);
+                jd = d.toISOString().split('T')[0];
               }
-
-              const esc = (str: string) => str.replace(/'/g, "''");
-              allValues.push(
-                `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i].nom)}', '${evts[i].fec}', '${jd}', '${evts[i].hor}', '${evts[j].hor}', ${Math.round(dur * 100) / 100}, '${esc(evts[i].tur)}', '${esc(evts[i].sec)}', '${esc(evts[i].emp)}')`
-              );
-              localPaired.add(i);
-              localPaired.add(j);
-              pairedDuration.set(i, Math.round(dur * 100) / 100);
-              pairedDuration.set(j, Math.round(dur * 100) / 100);
             }
-            break;
+
+            const esc = (str: string) => str.replace(/'/g, "''");
+            allValues.push(
+              `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i].nom)}', '${evts[i].fec}', '${jd}', '${evts[i].hor}', '${evts[j].hor}', ${Math.round(dur * 100) / 100}, '${esc(evts[i].tur)}', '${esc(evts[i].sec)}', '${esc(evts[i].emp)}')`
+            );
+            localPaired.add(i);
+            localPaired.add(j);
+            // Solo poner duracion en la Salida (Egreso) - la Entrada no necesita duracion
+            pairedDuration.set(i, Math.round(dur * 100) / 100);
           }
+          // Si encontramos una Entrada no emparejada (válida o no), paramos para esta Salida
+          break;
         }
       }
 
