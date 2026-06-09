@@ -78,6 +78,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No data found in file' }, { status: 400 });
     }
 
+    // Debug: log raw data info
+    const rawKeys = Object.keys(rawData[0] || {});
+    console.log('Upload debug:', {
+      totalRows: rawData.length,
+      sheetName,
+      columns: rawKeys,
+      firstRow: rawData[0],
+    });
+
     // Filter only Salida Depo and Entrada Depo
     const ficheroKey = rawData[0]['FICHERO '] !== undefined ? 'FICHERO ' : 'FICHERO';
     const filtered = rawData.filter(row => {
@@ -189,8 +198,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         registrosProcesados: rawData.length,
+        filteredCount: filtered.length,
+        eventsCount: events.length,
         sessionsCalculadas: 0,
         warning: 'No se encontraron pares salida/entrada válidos',
+        ficheroKey,
+        sampleFiltered: filtered.slice(0, 3),
       });
     }
 
@@ -200,6 +213,7 @@ export async function POST(request: NextRequest) {
     // Insert all in a single transaction using raw SQL for speed
     const { randomUUID } = await import('crypto');
     const batchSize = 1000;
+    let insertedTotal = 0;
     for (let i = 0; i < sessions.length; i += batchSize) {
       const batch = sessions.slice(i, i + batchSize);
       const values = batch.map(s => {
@@ -210,15 +224,23 @@ export async function POST(request: NextRequest) {
         const emp = s.empresa.replace(/'/g, "''");
         return `('${randomUUID()}', '${leg}', '${nom}', '${s.fecha}', '${s.jornadaDate || s.fecha}', '${s.horaSalida}', '${s.horaEntrada}', ${s.duracionMinutos}, '${tur}', '${sec}', '${emp}')`;
       }).join(',');
-      await db.$executeRawUnsafe(
+      const result = await db.$executeRawUnsafe(
         `INSERT INTO "TiempoFuera" (id, legajo, nombre, fecha, "jornadaDate", "horaSalida", "horaEntrada", "duracionMinutos", turno, sector, empresa) VALUES ${values}`
       );
+      insertedTotal += batch.length;
+      console.log(`Inserted batch ${Math.floor(i/batchSize)+1}: ${batch.length} rows`);
     }
+
+    // Verify insertion
+    const verifyCount = await db.tiempoFuera.count();
 
     return NextResponse.json({
       success: true,
       registrosProcesados: rawData.length,
+      filteredCount: filtered.length,
       sessionsCalculadas: sessions.length,
+      insertedTotal,
+      verifyCount,
     });
   } catch (error) {
     console.error('Upload error:', error);
