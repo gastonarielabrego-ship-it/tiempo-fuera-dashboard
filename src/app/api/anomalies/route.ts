@@ -4,8 +4,43 @@ import { db } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
 
+async function ensureAnomaliaTableSchema() {
+  // Check if the table has the correct columns
+  try {
+    const cols: any[] = await db.$queryRawUnsafe(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'AnomaliaEvento' AND column_name = 'horaEntrada1'
+    `);
+    if (cols.length === 0) {
+      // Table has old schema - fix it by dropping and recreating
+      console.log('AnomaliaEvento has old schema, recreating...');
+      await db.$executeRawUnsafe(`DROP TABLE IF EXISTS "AnomaliaEvento"`);
+      await db.$executeRawUnsafe(`
+        CREATE TABLE "AnomaliaEvento" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "legajo" TEXT NOT NULL,
+          "nombre" TEXT NOT NULL,
+          "fecha" TEXT NOT NULL,
+          "horaEntrada1" TEXT NOT NULL,
+          "horaEntrada2" TEXT NOT NULL,
+          "diferenciaMinutos" INTEGER NOT NULL,
+          "turno" TEXT NOT NULL,
+          "sector" TEXT NOT NULL,
+          "empresa" TEXT NOT NULL,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      console.log('AnomaliaEvento table recreated with correct schema');
+    }
+  } catch (e) {
+    console.error('Error checking/migrating AnomaliaEvento table:', e);
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
+    await ensureAnomaliaTableSchema();
+
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') || '';
     const fecha = searchParams.get('fecha') || '';
