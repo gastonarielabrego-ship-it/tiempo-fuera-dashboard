@@ -102,19 +102,42 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // For fichadas without duration already set, compute it by pairing S→E
-    // Group by legajo + fecha for pairing
-    const movements = fichadas.map((f: any) => ({
-      tipo: f.tipo,
-      legajo: f.legajo,
-      nombre: f.nombre,
-      fecha: f.fecha,
-      hora: f.hora,
-      turno: f.turno,
-      sector: f.sector,
-      empresa: f.empresa,
-      duracionMinutos: f.duracionMinutos,
-    }));
+    // Calcular duración dinámicamente entre filas consecutivas por legajo + fecha
+    // Solo se muestra duración en Salida (Egreso): tiempo hasta la próxima Entrada
+    const movements: any[] = [];
+    for (let i = 0; i < fichadas.length; i++) {
+      const f = fichadas[i];
+      let dur = null;
+
+      if (f.tipo === 'Salida Depo') {
+        // Buscar la próxima Entrada para el mismo legajo+fecha
+        for (let j = i + 1; j < fichadas.length; j++) {
+          const next = fichadas[j];
+          if (next.legajo !== f.legajo || next.fecha !== f.fecha) break;
+          if (next.tipo === 'Entrada Depo') {
+            const [h1, m1, s1] = f.hora.split(':').map(Number);
+            const [h2, m2, s2] = next.hora.split(':').map(Number);
+            const durSec = (h2 * 3600 + m2 * 60 + s2) - (h1 * 3600 + m1 * 60 + s1);
+            if (durSec > 0 && durSec < 86400) {
+              dur = Math.round(durSec / 60 * 100) / 100;
+            }
+            break;
+          }
+        }
+      }
+
+      movements.push({
+        tipo: f.tipo,
+        legajo: f.legajo,
+        nombre: f.nombre,
+        fecha: f.fecha,
+        hora: f.hora,
+        turno: f.turno,
+        sector: f.sector,
+        empresa: f.empresa,
+        duracionMinutos: dur,
+      });
+    }
 
     // Get unique names and dates
     const uniqueNames: any[] = await db.$queryRawUnsafe(
