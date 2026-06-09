@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import * as XLSX from 'xlsx'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -157,139 +156,39 @@ export default function Dashboard() {
 
     setUploading(true)
     try {
-      // Read and parse Excel on the CLIENT side (avoids serverless timeout)
-      const buffer = await file.arrayBuffer()
-      const workbook = XLSX.read(buffer, { type: 'array' })
-      const sheetName = Object.keys(workbook.Sheets).find(
-        name => name.toLowerCase().includes('base')
-      ) || Object.keys(workbook.Sheets)[0]
-      const rawData: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName])
+      // Step 1: Parse Excel on server (returns sessions JSON)
+      const formData = new FormData()
+      formData.append('file', file)
+      const parseRes = await fetch('/api/parse', { method: 'POST', body: formData })
+      const parseData = await parseRes.json()
 
-      if (rawData.length === 0) {
-        toast.error('No se encontraron datos en el archivo')
+      if (!parseRes.ok) {
+        toast.error(`Error al leer archivo: ${parseData.error}`)
         return
       }
 
-      // Helper functions
-      const getVal = (row: any, keys: string[]) => {
-        for (const key of keys) {
-          if (row[key] !== undefined && row[key] !== null && row[key] !== '') return String(row[key]).trim()
-        }
-        return ''
-      }
-      const excelDateToString = (date: any) => {
-        if (typeof date === 'number') {
-          const excelEpoch = new Date(1899, 11, 30)
-          const jsDate = new Date(excelEpoch.getTime() + date * 86400000)
-          return jsDate.toISOString().split('T')[0]
-        }
-        const d = new Date(date)
-        if (isNaN(d.getTime())) return String(date)
-        return d.toISOString().split('T')[0]
-      }
-      const excelTimeToString = (time: any) => {
-        if (typeof time === 'number') {
-          const totalSeconds = Math.round(time * 86400)
-          const hours = Math.floor(totalSeconds / 3600)
-          const minutes = Math.floor((totalSeconds % 3600) / 60)
-          const seconds = totalSeconds % 60
-          return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-        }
-        return String(time)
-      }
-
-      // Filter Salida/Entrada Depo
-      const filtered = rawData.filter((row: any) => {
-        const fichero = getVal(row, ['FICHERO ', 'FICHERO'])
-        return fichero === 'Salida Depo' || fichero === 'Entrada Depo'
-      })
-
-      // Build events
-      const events = filtered.map((row: any) => {
-        const fichero = getVal(row, ['FICHERO ', 'FICHERO'])
-        const fechaStr = excelDateToString(getVal(row, ['FECHA']) || '')
-        const horaStr = excelTimeToString(getVal(row, ['HORA']) || '')
-        const [hh, mm, ss] = horaStr.split(':').map(Number)
-        const sortKey = new Date(fechaStr).getTime() + (hh * 3600 + mm * 60 + ss) * 1000
-        return {
-          legajo: getVal(row, ['legajo']),
-          nombre: getVal(row, ['Apellido y Nombre ', 'Apellido y Nombre']),
-          fecha: fechaStr,
-          hora: horaStr,
-          tipo: fichero === 'Salida Depo' ? 'salida' : 'entrada',
-          turno: getVal(row, ['TURNO ', 'TURNO']),
-          sector: getVal(row, ['SECTOR ', 'SECTOR']),
-          empresa: getVal(row, ['EMPRESA ', 'EMPRESA']),
-          sortKey,
-        }
-      })
-
-      // Sort by legajo, fecha+hora
-      events.sort((a: any, b: any) => {
-        if (a.legajo !== b.legajo) return a.legajo.localeCompare(b.legajo)
-        return a.sortKey - b.sortKey
-      })
-
-      // Pair Salida with next Entrada
-      const sessions: any[] = []
-      const byLegajo = new Map<string, any[]>()
-      for (const ev of events) {
-        if (!byLegajo.has(ev.legajo)) byLegajo.set(ev.legajo, [])
-        byLegajo.get(ev.legajo)!.push(ev)
-      }
-
-      for (const [, legEvents] of byLegajo) {
-        for (let i = 0; i < legEvents.length; i++) {
-          if (legEvents[i].tipo !== 'salida') continue
-          for (let j = i + 1; j < legEvents.length; j++) {
-            if (legEvents[j].tipo === 'entrada') {
-              const duracion = (legEvents[j].sortKey - legEvents[i].sortKey) / 60000
-              if (duracion > 0 && duracion < 720) {
-                const [hSalida] = legEvents[i].hora.split(':').map(Number)
-                let jornadaDate = legEvents[i].fecha
-                const turnoStr = legEvents[i].turno.toLowerCase()
-                if (turnoStr.startsWith('tn') && hSalida >= 19) {
-                  const salidaDate = new Date(legEvents[i].fecha + 'T00:00:00')
-                  salidaDate.setDate(salidaDate.getDate() - 1)
-                  jornadaDate = salidaDate.toISOString().split('T')[0]
-                }
-                sessions.push({
-                  legajo: legEvents[i].legajo,
-                  nombre: legEvents[i].nombre,
-                  fecha: legEvents[i].fecha,
-                  jornadaDate,
-                  horaSalida: legEvents[i].hora,
-                  horaEntrada: legEvents[j].hora,
-                  duracionMinutos: Math.round(duracion * 100) / 100,
-                  turno: legEvents[i].turno,
-                  sector: legEvents[i].sector,
-                  empresa: legEvents[i].empresa,
-                })
-              }
-              break
-            }
-          }
-        }
-      }
-
-      if (sessions.length === 0) {
-        toast.error('No se encontraron pares salida/entrada válidos')
+      const { sessions, totalRows } = parseData
+      if (!sessions || sessions.length === 0) {
+        toast.error(`No se encontraron pares salida/entrada (${totalRows} filas leídas)`)
         return
       }
 
-      // Send processed sessions to server (only DB insert, very fast)
-      const res = await fetch('/api/upload', {
+      toast.info(`Procesando ${sessions.length} sesiones...`)
+
+      // Step 2: Insert sessions to DB (fast, just SQL inserts)
+      const insertRes = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessions }),
       })
-      const data = await res.json()
-      if (res.ok) {
-        toast.success(`Archivo procesado: ${sessions.length} sesiones calculadas`)
+      const insertData = await insertRes.json()
+
+      if (insertRes.ok) {
+        toast.success(`${sessions.length} sesiones cargadas (${totalRows} filas procesadas)`)
         fetchRanking()
         fetchStats()
       } else {
-        toast.error(`Error: ${data.error}`)
+        toast.error(`Error al guardar: ${insertData.error}`)
       }
     } catch (err) {
       toast.error('Error al procesar el archivo')
