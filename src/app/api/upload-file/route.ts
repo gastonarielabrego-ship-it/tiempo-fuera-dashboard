@@ -19,9 +19,20 @@ function toTime(t: any): string {
   return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function getVal(r: any, keys: string[]): string {
-  for (const k of keys) if (r[k] != null && r[k] !== '') return String(r[k]).trim();
+// Get string value from row, trying multiple column name variants
+function val(r: any, keys: string[]): string {
+  for (const k of keys) {
+    if (r[k] != null && r[k] !== '') return String(r[k]).trim();
+  }
   return '';
+}
+
+// Get raw value (preserves number type) for date/time fields
+function raw(r: any, keys: string[]): any {
+  for (const k of keys) {
+    if (r[k] != null && r[k] !== '') return r[k];
+  }
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -37,18 +48,18 @@ export async function POST(request: NextRequest) {
     const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
     if (!rows.length) return NextResponse.json({ error: 'El archivo está vacío' }, { status: 400 });
 
-    console.log(`Upload: ${rows.length} rows read, parsing events...`);
+    console.log(`Upload: ${rows.length} rows read from sheet "${sheetName}"`);
 
-    // Build events map
+    // Build events map: legajo → sorted events
     const map = new Map<string, any[]>();
-    let eventCount = 0;
     for (const r of rows) {
-      const fichero = getVal(r, ['FICHERO ', 'FICHERO']);
+      const fichero = val(r, ['FICHERO ', 'FICHERO']);
       if (fichero !== 'Salida Depo' && fichero !== 'Entrada Depo') continue;
 
-      const leg = getVal(r, ['legajo', 'Legajo', 'LEGHAJO', 'leg']);
-      const fec = toDate(getVal(r, ['FECHA', 'Fecha', 'fecha']) || r['FECHA']);
-      const hor = toTime(getVal(r, ['HORA', 'Hora', 'hora']) || r['HORA']);
+      const leg = val(r, ['legajo', 'Legajo', 'LEGHAJO']);
+      // Use RAW values for FECHA and HORA to preserve number type
+      const fec = toDate(raw(r, ['FECHA', 'Fecha', 'fecha']));
+      const hor = toTime(raw(r, ['HORA', 'Hora', 'hora']));
       const [h, m, s] = hor.split(':').map(Number);
       const key = new Date(fec).getTime() + (h * 3600 + m * 60 + s) * 1000;
 
@@ -56,21 +67,19 @@ export async function POST(request: NextRequest) {
       map.get(leg)!.push({
         tipo: fichero === 'Salida Depo' ? 'S' : 'E',
         fec, hor, key,
-        nom: getVal(r, ['Apellido y Nombre ', 'Apellido y Nombre', 'apellido y nombre']),
-        tur: getVal(r, ['TURNO ', 'TURNO', 'Turno', 'turno']),
-        sec: getVal(r, ['SECTOR ', 'SECTOR', 'Sector', 'sector']),
-        emp: getVal(r, ['EMPRESA ', 'EMPRESA', 'Empresa', 'empresa']),
+        nom: val(r, ['Apellido y Nombre ', 'Apellido y Nombre']),
+        tur: val(r, ['TURNO ', 'TURNO', 'Turno']),
+        sec: val(r, ['SECTOR ', 'SECTOR', 'Sector']),
+        emp: val(r, ['EMPRESA ', 'EMPRESA', 'Empresa']),
       });
-      eventCount++;
     }
 
-    console.log(`Upload: ${eventCount} events from ${map.size} employees`);
+    console.log(`Upload: ${map.size} employees, ${Array.from(map.values()).flat().length} events`);
 
-    // Pair Salida → Entrada
-    const sessions: any[] = [];
+    // Pair Salida → Entrada and build SQL values
     const { randomUUID } = await import('crypto');
-    const batchSize = 2000;
     const allValues: string[] = [];
+    const batchSize = 2000;
 
     for (const [legajo, evts] of map) {
       evts.sort((a: any, b: any) => a.key - b.key);
@@ -87,12 +96,10 @@ export async function POST(request: NextRequest) {
                 d.setDate(d.getDate() - 1);
                 jd = d.toISOString().split('T')[0];
               }
-              const leg = String(legajo).replace(/'/g, "''");
-              const nom = String(evts[i].nom).replace(/'/g, "''");
-              const tur = String(evts[i].tur).replace(/'/g, "''");
-              const sec = String(evts[i].sec).replace(/'/g, "''");
-              const emp = String(evts[i].emp).replace(/'/g, "''");
-              allValues.push(`('${randomUUID()}', '${leg}', '${nom}', '${evts[i].fec}', '${jd}', '${evts[i].hor}', '${evts[j].hor}', ${Math.round(dur * 100) / 100}, '${tur}', '${sec}', '${emp}')`);
+              const esc = (s: string) => s.replace(/'/g, "''");
+              allValues.push(
+                `('${randomUUID()}', '${esc(legajo)}', '${esc(evts[i].nom)}', '${evts[i].fec}', '${jd}', '${evts[i].hor}', '${evts[j].hor}', ${Math.round(dur * 100) / 100}, '${esc(evts[i].tur)}', '${esc(evts[i].sec)}', '${esc(evts[i].emp)}')`
+              );
             }
             break;
           }
@@ -101,10 +108,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (!allValues.length) {
-      return NextResponse.json({ error: `No se encontraron pares salida/entrada (${rows.length} filas leídas, ${eventCount} eventos)` }, { status: 400 });
+      return NextResponse.json({
+        error: `No se encontraron pares salida/entrada (${rows.length} filas, ${map.size} empleados). Verificá que el archivo tenga columnas Salida/Entrada Depo.`
+      }, { status: 400 });
     }
 
-    console.log(`Upload: deleting old data and inserting ${allValues.length} sessions...`);
+    console.log(`Upload: ${allValues.length} pairs found, inserting...`);
 
     // Delete old data
     await db.$executeRawUnsafe(`DELETE FROM "TiempoFuera"`);
