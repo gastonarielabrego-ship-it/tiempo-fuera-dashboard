@@ -102,26 +102,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Calcular duración dinámicamente entre filas consecutivas por legajo + fecha
-    // Solo se muestra duración en Salida (Egreso): tiempo hasta la próxima Entrada
+    // Calcular duración dinámicamente entre CADA fila y la SIGUIENTE del mismo legajo+fecha
+    // Muestra diferencia sin importar el tipo (Egreso→Ingreso, Egreso→Egreso, Ingreso→Egreso, etc.)
     const movements: any[] = [];
     for (let i = 0; i < fichadas.length; i++) {
       const f = fichadas[i];
       let dur = null;
 
-      if (f.tipo === 'Salida Depo') {
-        // Buscar la próxima Entrada para el mismo legajo+fecha
-        for (let j = i + 1; j < fichadas.length; j++) {
-          const next = fichadas[j];
-          if (next.legajo !== f.legajo || next.fecha !== f.fecha) break;
-          if (next.tipo === 'Entrada Depo') {
-            const [h1, m1, s1] = f.hora.split(':').map(Number);
-            const [h2, m2, s2] = next.hora.split(':').map(Number);
-            const durSec = (h2 * 3600 + m2 * 60 + s2) - (h1 * 3600 + m1 * 60 + s1);
-            if (durSec > 0 && durSec < 86400) {
-              dur = Math.round(durSec / 60 * 100) / 100;
-            }
-            break;
+      // Buscar la próxima fila del mismo legajo+fecha
+      if (i + 1 < fichadas.length) {
+        const next = fichadas[i + 1];
+        if (next.legajo === f.legajo && next.fecha === f.fecha) {
+          const [h1, m1, s1] = f.hora.split(':').map(Number);
+          const [h2, m2, s2] = next.hora.split(':').map(Number);
+          const durSec = (h2 * 3600 + m2 * 60 + s2) - (h1 * 3600 + m1 * 60 + s1);
+          if (durSec > 0 && durSec < 86400) {
+            dur = Math.round(durSec / 60 * 100) / 100;
           }
         }
       }
