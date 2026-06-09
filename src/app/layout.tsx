@@ -31,7 +31,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <Script
-          src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"
+          src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
           strategy="beforeInteractive"
         />
       </head>
