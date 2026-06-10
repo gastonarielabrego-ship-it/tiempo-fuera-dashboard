@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
 
     // Build WHERE clause for Fichada
     let whereClause = 'WHERE 1=1';
+    whereClause += ` AND "empresa" != 'Gestion Externo'`;
     const params: string[] = [];
     let pIdx = 1;
 

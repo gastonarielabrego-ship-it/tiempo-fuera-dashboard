@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
     const turnoTipo = searchParams.get('turnoTipo') || '';
 
     let whereClause = 'WHERE 1=1';
+    whereClause += ` AND "empresa" != 'Gestion Externo'`;
     const params: string[] = [];
     let paramIndex = 1;
 

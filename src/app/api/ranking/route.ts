@@ -94,6 +94,7 @@ export async function GET(request: NextRequest) {
 
     // Build WHERE clause for Fichada
     let whereClause = 'WHERE 1=1';
+    whereClause += ` AND "empresa" != 'Gestion Externo'`;
     const params: string[] = [];
     let pIdx = 1;
 
@@ -207,7 +208,7 @@ export async function GET(request: NextRequest) {
       `SELECT DISTINCT "sector" as sector FROM "Fichada" ORDER BY sector ASC`
     );
     const allEmpresas: any[] = await db.$queryRawUnsafe(
-      `SELECT DISTINCT "empresa" as empresa FROM "Fichada" ORDER BY empresa ASC`
+      `SELECT DISTINCT "empresa" as empresa FROM "Fichada" WHERE "empresa" != 'Gestion Externo' ORDER BY empresa ASC`
     );
     const dateRange: any[] = await db.$queryRawUnsafe(
       `SELECT MIN("fecha") as "fechaMin", MAX("fecha") as "fechaMax" FROM "Fichada"`
