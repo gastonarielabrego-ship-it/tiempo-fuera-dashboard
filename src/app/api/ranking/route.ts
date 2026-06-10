@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
 
       const ranked = ranking.map((r, i) => {
         const rawTotal = Math.round((r._sum.duracionMinutos || 0) * 100) / 100;
-        const descuento = rawTotal >= 60 ? 60 : 0;
+        const descuento = rawTotal >= 60 ? 60 : rawTotal;
         return {
           ranking: i + 1,
           legajo: r.legajo,
@@ -176,7 +176,7 @@ export async function GET(request: NextRequest) {
 
     const ranked = rows.map((r, i) => {
       const rawTotal = Number(r.total_minutos) || 0;
-      const descuento = rawTotal >= 60 ? 60 : 0;
+      const descuento = rawTotal >= 60 ? 60 : rawTotal;
       const neto = Math.round((rawTotal - descuento) * 100) / 100;
       return {
         ranking: 0,
