@@ -162,7 +162,6 @@ export async function GET(request: NextRequest) {
         legajo,
         MAX(nombre) as nombre,
         ROUND(SUM(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min ELSE 0 END)::numeric, 2) as total_minutos,
-        ROUND(SUM(CASE WHEN tipo = 'Entrada Depo' AND dur_min >= 60 AND dur_min < 1440 THEN 60 ELSE 0 END)::numeric, 2) as descuento_minutos,
         COUNT(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN 1 END) as cantidad_ingresos,
         ROUND(AVG(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min END)::numeric, 2) as promedio_minutos,
         COUNT(CASE WHEN tipo = 'Salida Depo' THEN 1 END) as cantidad_salidas
@@ -176,7 +175,7 @@ export async function GET(request: NextRequest) {
 
     const ranked = rows.map((r, i) => {
       const rawTotal = Number(r.total_minutos) || 0;
-      const descuento = Number(r.descuento_minutos) || 0;
+      const descuento = rawTotal >= 60 ? 60 : 0;
       const neto = Math.round((rawTotal - descuento) * 100) / 100;
       return {
         ranking: 0,
