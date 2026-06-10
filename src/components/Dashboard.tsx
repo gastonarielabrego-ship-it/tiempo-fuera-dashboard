@@ -68,8 +68,6 @@ interface BreakfastExcessItem {
   legajo: string
   nombre: string
   fecha: string
-  tipoSalida: string
-  tipoEntrada: string
   horaSalida: string
   horaEntrada: string
   duracionTotal: number

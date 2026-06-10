@@ -56,7 +56,8 @@ export async function GET(request: NextRequest) {
       params.push(`%${search}%`); pIdx++;
     }
 
-    // Solo eventos entre 06:30 y 10:30, con LAG para duración, jornada TN
+    // Buscar pares Salida→Entrada en ventana 6:30-10:30
+    // Usar LEAD para obtener el evento siguiente a cada Salida
     const sql = `
       WITH raw_fichadas AS (
         SELECT * FROM "Fichada" ${whereClause}
@@ -70,44 +71,50 @@ export async function GET(request: NextRequest) {
           END as jornada
         FROM raw_fichadas
       ),
-      ordered AS (
-        SELECT *,
-          LAG(hora) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as prev_hora,
-          LAG(tipo) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as prev_tipo
-        FROM with_jornada
-      ),
-      with_dur AS (
-        SELECT *,
-          CASE
-            WHEN prev_hora IS NOT NULL THEN
-              (EXTRACT(EPOCH FROM hora::time - prev_hora::time) / 60)
-            ELSE NULL
-          END as dur_min
-        FROM ordered
-      ),
-      breakfast_events AS (
-        SELECT *
-        FROM with_dur
+      breakfast_window AS (
+        SELECT * FROM with_jornada
         WHERE hora >= '06:30:00' AND hora <= '10:30:00'
-          AND dur_min IS NOT NULL
-          AND dur_min > 25
-          AND dur_min < 1440
+      ),
+      with_next AS (
+        SELECT *,
+          LEAD(hora) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_hora,
+          LEAD(tipo) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_tipo,
+          LEAD(nombre) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_nombre,
+          LEAD(sector) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_sector,
+          LEAD(empresa) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_empresa,
+          LEAD(turno) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_turno
+        FROM breakfast_window
+      ),
+      breakfast_pairs AS (
+        SELECT
+          legajo,
+          nombre,
+          jornada as fecha,
+          hora as hora_salida,
+          next_hora as hora_entrada,
+          turno,
+          sector,
+          empresa,
+          (EXTRACT(EPOCH FROM next_hora::time - hora::time) / 60) as dur_min
+        FROM with_next
+        WHERE tipo = 'Salida Depo'
+          AND next_tipo = 'Entrada Depo'
+          AND (EXTRACT(EPOCH FROM next_hora::time - hora::time) / 60) > 25
+          AND (EXTRACT(EPOCH FROM next_hora::time - hora::time) / 60) < 1440
       )
       SELECT
         legajo,
         nombre,
-        jornada as fecha,
-        prev_tipo as tipo_salida,
-        tipo as tipo_entrada,
-        prev_hora as hora_salida,
-        hora as hora_entrada,
+        fecha,
+        hora_salida,
+        hora_entrada,
         ROUND(dur_min::numeric, 2) as duracion_total,
         ROUND((dur_min - 25)::numeric, 2) as exceso_minutos,
         turno,
         sector,
         empresa
-      FROM breakfast_events
-      ORDER BY exceso_minutos DESC, fecha, hora
+      FROM breakfast_pairs
+      ORDER BY exceso_minutos DESC
     `;
 
     const rows: any[] = params.length > 0
@@ -118,8 +125,6 @@ export async function GET(request: NextRequest) {
       legajo: r.legajo,
       nombre: r.nombre,
       fecha: r.fecha,
-      tipoSalida: r.tipo_salida || 'Salida Depo',
-      tipoEntrada: r.tipo_entrada || 'Entrada Depo',
       horaSalida: r.hora_salida,
       horaEntrada: r.hora_entrada,
       duracionTotal: Number(r.duracion_total) || 0,
