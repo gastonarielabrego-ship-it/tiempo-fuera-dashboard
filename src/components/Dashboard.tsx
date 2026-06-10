@@ -21,8 +21,10 @@ interface RankingItem {
   legajo: string
   nombre: string
   totalMinutos: number
-  totalHoras: number
+  descuentoMinutos: number
+  netoMinutos: number
   cantidadSalidas: number
+  cantidadIngresos: number
   promedioMinutos: number
   turno: string
 }
@@ -74,6 +76,14 @@ function formatDuration(minutes: number): string {
   const m = Math.round(minutes % 60)
   if (h === 0) return `${m} min`
   return `${h}h ${m}m`
+}
+
+function formatHHMMSS(totalMinutes: number): string {
+  const totalSec = Math.round(totalMinutes * 60)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
 function getRankBadgeColor(ranking: number): string {
@@ -683,7 +693,8 @@ export default function Dashboard() {
                         <TableHead className="w-24">Legajo</TableHead>
                         <TableHead>Nombre</TableHead>
                         <TableHead className="text-right">Tiempo Total</TableHead>
-                        <TableHead className="text-right hidden md:table-cell">Horas</TableHead>
+                        <TableHead className="text-right hidden md:table-cell">Descuento</TableHead>
+                        <TableHead className="text-right">Tiempo Neto</TableHead>
                         <TableHead className="text-right hidden sm:table-cell">Salidas</TableHead>
                         <TableHead className="text-right hidden lg:table-cell">Promedio</TableHead>
                         <TableHead className="hidden xl:table-cell">Turno</TableHead>
@@ -693,7 +704,7 @@ export default function Dashboard() {
                       {loading ? (
                         Array.from({ length: 10 }).map((_, i) => (
                           <TableRow key={i}>
-                            {Array.from({ length: 8 }).map((_, j) => (
+                            {Array.from({ length: 9 }).map((_, j) => (
                               <TableCell key={j}>
                                 <div className="h-4 bg-slate-200 animate-pulse rounded" />
                               </TableCell>
@@ -702,7 +713,7 @@ export default function Dashboard() {
                         ))
                       ) : ranking.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center py-12 text-slate-500">
+                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
                             No se encontraron registros
                           </TableCell>
                         </TableRow>
@@ -716,11 +727,14 @@ export default function Dashboard() {
                             </TableCell>
                             <TableCell className="font-mono text-sm">{item.legajo}</TableCell>
                             <TableCell className="font-medium">{item.nombre}</TableCell>
-                            <TableCell className="text-right font-semibold text-red-600">
-                              {formatDuration(item.totalMinutos)}
+                            <TableCell className="text-right font-mono text-sm">
+                              {formatHHMMSS(item.totalMinutos)}
                             </TableCell>
-                            <TableCell className="text-right font-mono text-sm hidden md:table-cell">
-                              {item.totalHoras.toFixed(1)}h
+                            <TableCell className="text-right font-mono text-sm text-orange-600 hidden md:table-cell">
+                              {formatHHMMSS(item.descuentoMinutos || 0)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold font-mono text-sm text-red-600">
+                              {formatHHMMSS(item.netoMinutos)}
                             </TableCell>
                             <TableCell className="text-right hidden sm:table-cell">
                               <Badge variant="secondary">{item.cantidadSalidas}</Badge>

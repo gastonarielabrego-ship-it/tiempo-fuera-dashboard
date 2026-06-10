@@ -65,16 +65,22 @@ export async function GET(request: NextRequest) {
           : { _sum: { duracionMinutos: 'desc' } },
       });
 
-      const ranked = ranking.map((r, i) => ({
-        ranking: i + 1,
-        legajo: r.legajo,
-        nombre: r.nombre,
-        totalMinutos: Math.round((r._sum.duracionMinutos || 0) * 100) / 100,
-        totalHoras: Math.round((r._sum.duracionMinutos || 0) / 60 * 100) / 100,
-        cantidadSalidas: r._count.id,
-        promedioMinutos: Math.round((r._avg.duracionMinutos || 0) * 100) / 100,
-        turno: '-',
-      }));
+      const ranked = ranking.map((r, i) => {
+        const rawTotal = Math.round((r._sum.duracionMinutos || 0) * 100) / 100;
+        const descuento = rawTotal >= 60 ? 60 : 0;
+        return {
+          ranking: i + 1,
+          legajo: r.legajo,
+          nombre: r.nombre,
+          totalMinutos: rawTotal,
+          descuentoMinutos: descuento,
+          netoMinutos: Math.round((rawTotal - descuento) * 100) / 100,
+          cantidadSalidas: r._count.id,
+          cantidadIngresos: r._count.id,
+          promedioMinutos: Math.round((r._avg.duracionMinutos || 0) * 100) / 100,
+          turno: '-',
+        };
+      });
 
       return NextResponse.json({
         ranking: ranked.slice((page - 1) * pageSize, page * pageSize),
@@ -156,12 +162,12 @@ export async function GET(request: NextRequest) {
         legajo,
         MAX(nombre) as nombre,
         ROUND(SUM(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min ELSE 0 END)::numeric, 2) as total_minutos,
+        ROUND(SUM(CASE WHEN tipo = 'Entrada Depo' AND dur_min >= 60 AND dur_min < 1440 THEN 60 ELSE 0 END)::numeric, 2) as descuento_minutos,
         COUNT(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN 1 END) as cantidad_ingresos,
         ROUND(AVG(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min END)::numeric, 2) as promedio_minutos,
         COUNT(CASE WHEN tipo = 'Salida Depo' THEN 1 END) as cantidad_salidas
       FROM with_dur
       GROUP BY legajo
-      ORDER BY ${sortBy === 'salidas' ? 'cantidad_salidas' : 'total_minutos'} DESC
     `;
 
     const rows: any[] = params.length > 0
@@ -170,13 +176,15 @@ export async function GET(request: NextRequest) {
 
     const ranked = rows.map((r, i) => {
       const rawTotal = Number(r.total_minutos) || 0;
-      const ajustado = rawTotal > 60 ? rawTotal - 60 : rawTotal;
+      const descuento = Number(r.descuento_minutos) || 0;
+      const neto = Math.round((rawTotal - descuento) * 100) / 100;
       return {
         ranking: 0,
         legajo: r.legajo,
         nombre: r.nombre,
-        totalMinutos: Math.round(ajustado * 100) / 100,
-        totalHoras: Math.round(ajustado / 60 * 100) / 100,
+        totalMinutos: Math.round(rawTotal * 100) / 100,
+        descuentoMinutos: Math.round(descuento * 100) / 100,
+        netoMinutos: neto,
         cantidadSalidas: Number(r.cantidad_salidas) || 0,
         cantidadIngresos: Number(r.cantidad_ingresos) || 0,
         promedioMinutos: Number(r.promedio_minutos) || 0,
@@ -184,10 +192,10 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Ordenar por tiempo ajustado
+    // Ordenar por tiempo neto
     ranked.sort((a, b) => sortBy === 'salidas'
       ? b.cantidadSalidas - a.cantidadSalidas
-      : b.totalMinutos - a.totalMinutos
+      : b.netoMinutos - a.netoMinutos
     );
     ranked.forEach((r, i) => r.ranking = i + 1);
 
