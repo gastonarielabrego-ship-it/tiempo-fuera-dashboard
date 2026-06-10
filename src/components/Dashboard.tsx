@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Upload, Clock, Users, TrendingUp, Search, Trophy,
-  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee, Moon
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -224,6 +224,7 @@ export default function Dashboard() {
         fetchAllMovements()
         fetchAnomalies()
         fetchBreakfastExcess()
+        fetchTnBreakExcess()
       } else {
         toast.error(`Error: ${data.error}`)
       }
@@ -309,6 +310,10 @@ export default function Dashboard() {
   const [breakfastExcess, setBreakfastExcess] = useState<BreakfastExcessItem[]>([])
   const [breakfastLoading, setBreakfastLoading] = useState(false)
 
+  // TN break excess state
+  const [tnBreakExcess, setTnBreakExcess] = useState<BreakfastExcessItem[]>([])
+  const [tnBreakLoading, setTnBreakLoading] = useState(false)
+
   const fetchAnomalies = useCallback(async () => {
     setAnomLoading(true)
     try {
@@ -348,12 +353,32 @@ export default function Dashboard() {
     }
   }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
 
+  const fetchTnBreakExcess = useCallback(async () => {
+    setTnBreakLoading(true)
+    try {
+      const params = new URLSearchParams()
+      sectorFilter.forEach(s => params.append('sector', s))
+      empresaFilter.forEach(e => params.append('empresa', e))
+      if (search) params.set('search', search)
+      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+      const res = await fetch(`/api/tn-break-excess?${params}`)
+      const data = await res.json()
+      setTnBreakExcess(data.excesos || [])
+    } catch (err) {
+      console.error('Error fetching TN break excess:', err)
+    } finally {
+      setTnBreakLoading(false)
+    }
+  }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
+
   useEffect(() => {
     if (filters.fechaMin) {
       fetchAnomalies()
       fetchBreakfastExcess()
+      fetchTnBreakExcess()
     }
-  }, [filters.fechaMin, fetchAnomalies, fetchBreakfastExcess])
+  }, [filters.fechaMin, fetchAnomalies, fetchBreakfastExcess, fetchTnBreakExcess])
 
   const downloadMovementsCSV = () => {
     if (!movements || movements.length === 0) return
@@ -690,6 +715,13 @@ export default function Dashboard() {
               Exceso Desayuno
               {breakfastExcess.length > 0 && (
                 <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{breakfastExcess.length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="break-tn" className="gap-2">
+              <Moon className="h-4 w-4" />
+              Break TN
+              {tnBreakExcess.length > 0 && (
+                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{tnBreakExcess.length}</Badge>
               )}
             </TabsTrigger>
           </TabsList>
@@ -1136,6 +1168,86 @@ export default function Dashboard() {
                       ) : (
                         breakfastExcess.map((b, idx) => (
                           <TableRow key={`${b.legajo}-${b.fecha}-${b.horaSalida}-${idx}`} className="hover:bg-amber-50/50 transition-colors">
+                            <TableCell className="font-mono text-sm">{b.legajo}</TableCell>
+                            <TableCell className="font-medium text-sm">{b.nombre}</TableCell>
+                            <TableCell className="text-sm">{formatDateDisplay(b.fecha)}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{b.horaSalida}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{b.horaEntrada}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{formatHHMMSS(b.duracionTotal)}</TableCell>
+                            <TableCell className="text-right font-semibold font-mono text-sm text-red-600">
+                              +{formatHHMMSS(b.excesoMinutos)}
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell text-xs text-slate-500">{b.turno}</TableCell>
+                            <TableCell className="hidden md:table-cell text-xs text-slate-500">{b.sector}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Break TN */}
+          <TabsContent value="break-tn">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Moon className="h-5 w-5 text-indigo-600" />
+                      Break TN
+                    </CardTitle>
+                    <CardDescription>
+                      Diferencias superiores a 15 minutos entre las 02:45 y 03:45 hs
+                      {tnBreakExcess.length > 0 && ` — ${tnBreakExcess.length} registro(s)`}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => fetchTnBreakExcess()} disabled={tnBreakLoading}>
+                      <RefreshCw className={`h-4 w-4 ${tnBreakLoading ? 'animate-spin' : ''}`} />
+                      Actualizar
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="w-20">Legajo</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-28">Fecha</TableHead>
+                        <TableHead className="w-20 text-center">H. Salida</TableHead>
+                        <TableHead className="w-20 text-center">H. Entrada</TableHead>
+                        <TableHead className="text-right">Duración Total</TableHead>
+                        <TableHead className="text-right">Exceso</TableHead>
+                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
+                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tnBreakLoading ? (
+                        Array.from({ length: 6 }).map((_, i) => (
+                          <TableRow key={i}>
+                            {Array.from({ length: 9 }).map((_, j) => (
+                              <TableCell key={j}>
+                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : tnBreakExcess.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+                            No hay excesos de break TN registrados
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        tnBreakExcess.map((b, idx) => (
+                          <TableRow key={`${b.legajo}-${b.fecha}-${b.horaSalida}-${idx}`} className="hover:bg-indigo-50/50 transition-colors">
                             <TableCell className="font-mono text-sm">{b.legajo}</TableCell>
                             <TableCell className="font-medium text-sm">{b.nombre}</TableCell>
                             <TableCell className="text-sm">{formatDateDisplay(b.fecha)}</TableCell>
