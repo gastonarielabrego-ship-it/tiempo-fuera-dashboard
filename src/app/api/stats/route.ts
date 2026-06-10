@@ -110,7 +110,6 @@ export async function GET(request: NextRequest) {
         )
         SELECT
           ROUND(SUM(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min ELSE 0 END)::numeric, 2) as total_min,
-          ROUND(AVG(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min END)::numeric, 2) as avg_min,
           COUNT(DISTINCT legajo) as empleados
         FROM with_dur
       `;
@@ -120,9 +119,64 @@ export async function GET(request: NextRequest) {
         : await db.$queryRawUnsafe(statsSql);
 
       if (statsRows.length > 0) {
-        totalMinutos = Number(statsRows[0].total_min) || 0;
-        promedioMinutos = Number(statsRows[0].avg_min) || 0;
         empleadosUnicos = Number(statsRows[0].empleados) || 0;
+        const rawTotal = Number(statsRows[0].total_min) || 0;
+        // Descontar 60 min por empleado (descanso) solo si ese empleado supera 60 min
+        // Se necesita un segundo query para saber cuántos empleados superan 60 min
+        if (empleadosUnicos > 0 && rawTotal > 0) {
+          const ajusteSql = `
+            WITH raw_fichadas AS (
+              SELECT * FROM "Fichada" ${whereClause}
+            ),
+            with_jornada AS (
+              SELECT *,
+                CASE
+                  WHEN turno ILIKE 'TN%' AND hora >= '17:00:00' THEN
+                    TO_CHAR(("fecha"::date + INTERVAL '1 day'), 'YYYY-MM-DD')
+                  ELSE "fecha"
+                END as jornada
+              FROM raw_fichadas
+            ),
+            ordered AS (
+              SELECT *,
+                LAG(hora) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as prev_hora
+              FROM with_jornada
+            ),
+            with_dur AS (
+              SELECT *,
+                CASE
+                  WHEN prev_hora IS NOT NULL THEN
+                    (EXTRACT(EPOCH FROM hora::time - prev_hora::time) / 60)
+                  ELSE NULL
+                END as dur_min
+              FROM ordered
+            ),
+            per_emp AS (
+              SELECT legajo,
+                SUM(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min ELSE 0 END) as emp_total
+              FROM with_dur
+              GROUP BY legajo
+              HAVING SUM(CASE WHEN tipo = 'Entrada Depo' AND dur_min > 0 AND dur_min < 1440 THEN dur_min ELSE 0 END) > 60
+            )
+            SELECT
+              ROUND(SUM(emp_total - 60)::numeric, 2) as descuento_total,
+              COUNT(*) as empleados_con_descuento
+            FROM per_emp
+          `;
+          const ajusteRows: any[] = params.length > 0
+            ? await db.$queryRawUnsafe(ajusteSql, ...params)
+            : await db.$queryRawUnsafe(ajusteSql);
+          if (ajusteRows.length > 0) {
+            const descuento = Number(ajusteRows[0].descuento_total) || 0;
+            totalMinutos = Math.round((rawTotal - descuento) * 100) / 100;
+          } else {
+            totalMinutos = Math.round(rawTotal * 100) / 100;
+          }
+        } else {
+          totalMinutos = Math.round(rawTotal * 100) / 100;
+        }
+        // Promedio = total ajustado / empleados
+        promedioMinutos = empleadosUnicos > 0 ? Math.round((totalMinutos / empleadosUnicos) * 100) / 100 : 0;
       }
     } else {
       // Fallback: use TiempoFuera

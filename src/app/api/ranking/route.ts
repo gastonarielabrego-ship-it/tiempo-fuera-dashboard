@@ -168,17 +168,28 @@ export async function GET(request: NextRequest) {
       ? await db.$queryRawUnsafe(sql, ...params)
       : await db.$queryRawUnsafe(sql);
 
-    const ranked = rows.map((r, i) => ({
-      ranking: i + 1,
-      legajo: r.legajo,
-      nombre: r.nombre,
-      totalMinutos: Number(r.total_minutos) || 0,
-      totalHoras: Math.round((Number(r.total_minutos) || 0) / 60 * 100) / 100,
-      cantidadSalidas: Number(r.cantidad_salidas) || 0,
-      cantidadIngresos: Number(r.cantidad_ingresos) || 0,
-      promedioMinutos: Number(r.promedio_minutos) || 0,
-      turno: '-',
-    }));
+    const ranked = rows.map((r, i) => {
+      const rawTotal = Number(r.total_minutos) || 0;
+      const ajustado = rawTotal > 60 ? rawTotal - 60 : rawTotal;
+      return {
+        ranking: 0,
+        legajo: r.legajo,
+        nombre: r.nombre,
+        totalMinutos: Math.round(ajustado * 100) / 100,
+        totalHoras: Math.round(ajustado / 60 * 100) / 100,
+        cantidadSalidas: Number(r.cantidad_salidas) || 0,
+        cantidadIngresos: Number(r.cantidad_ingresos) || 0,
+        promedioMinutos: Number(r.promedio_minutos) || 0,
+        turno: '-',
+      };
+    });
+
+    // Ordenar por tiempo ajustado
+    ranked.sort((a, b) => sortBy === 'salidas'
+      ? b.cantidadSalidas - a.cantidadSalidas
+      : b.totalMinutos - a.totalMinutos
+    );
+    ranked.forEach((r, i) => r.ranking = i + 1);
 
     const total = ranked.length;
     const start = (page - 1) * pageSize;
