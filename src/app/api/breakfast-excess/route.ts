@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 
     // Build WHERE clause
     let whereClause = 'WHERE 1=1';
-    whereClause += ` AND "empresa" != 'Gestion Externo'`;
+    whereClause += ` AND "empresa" NOT IN ('GESTION EE-EXTERNO', 'GESTION EE-EXTERNO(SELECCION)', 'G.L.D. GREMIAL EE')`;
     const params: string[] = [];
     let pIdx = 1;
 

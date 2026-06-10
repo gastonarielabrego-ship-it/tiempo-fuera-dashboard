@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     const turnoTipo = searchParams.get('turnoTipo') || '';
 
     let whereClause = 'WHERE 1=1';
-    whereClause += ` AND "empresa" != 'Gestion Externo'`;
+    whereClause += ` AND "empresa" NOT IN ('GESTION EE-EXTERNO', 'GESTION EE-EXTERNO(SELECCION)', 'G.L.D. GREMIAL EE')`;
     const params: string[] = [];
     let paramIndex = 1;
 
