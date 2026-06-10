@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Upload, Clock, Users, TrendingUp, Search, Trophy,
-  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -59,6 +59,21 @@ interface AnomaliaItem {
   horaEntrada1: string
   horaEntrada2: string
   diferenciaMinutos: number
+  turno: string
+  sector: string
+  empresa: string
+}
+
+interface BreakfastExcessItem {
+  legajo: string
+  nombre: string
+  fecha: string
+  tipoSalida: string
+  tipoEntrada: string
+  horaSalida: string
+  horaEntrada: string
+  duracionTotal: number
+  excesoMinutos: number
   turno: string
   sector: string
   empresa: string
@@ -210,6 +225,7 @@ export default function Dashboard() {
         fetchStats()
         fetchAllMovements()
         fetchAnomalies()
+        fetchBreakfastExcess()
       } else {
         toast.error(`Error: ${data.error}`)
       }
@@ -291,6 +307,10 @@ export default function Dashboard() {
   const [anomFecha, setAnomFecha] = useState('')
   const [anomSearch, setAnomSearch] = useState('')
 
+  // Breakfast excess state
+  const [breakfastExcess, setBreakfastExcess] = useState<BreakfastExcessItem[]>([])
+  const [breakfastLoading, setBreakfastLoading] = useState(false)
+
   const fetchAnomalies = useCallback(async () => {
     setAnomLoading(true)
     try {
@@ -311,11 +331,31 @@ export default function Dashboard() {
     }
   }, [anomSearch, anomFecha, turnoFilter, fechaDesde, fechaHasta])
 
+  const fetchBreakfastExcess = useCallback(async () => {
+    setBreakfastLoading(true)
+    try {
+      const params = new URLSearchParams()
+      sectorFilter.forEach(s => params.append('sector', s))
+      empresaFilter.forEach(e => params.append('empresa', e))
+      if (search) params.set('search', search)
+      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+      const res = await fetch(`/api/breakfast-excess?${params}`)
+      const data = await res.json()
+      setBreakfastExcess(data.excesos || [])
+    } catch (err) {
+      console.error('Error fetching breakfast excess:', err)
+    } finally {
+      setBreakfastLoading(false)
+    }
+  }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
+
   useEffect(() => {
     if (filters.fechaMin) {
       fetchAnomalies()
+      fetchBreakfastExcess()
     }
-  }, [filters.fechaMin, fetchAnomalies])
+  }, [filters.fechaMin, fetchAnomalies, fetchBreakfastExcess])
 
   const downloadMovementsCSV = () => {
     if (!movements || movements.length === 0) return
@@ -645,6 +685,13 @@ export default function Dashboard() {
               Inconsistencias
               {anomalies.length > 0 && (
                 <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{anomalies.length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="desayuno" className="gap-2">
+              <Coffee className="h-4 w-4" />
+              Exceso Desayuno
+              {breakfastExcess.length > 0 && (
+                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{breakfastExcess.length}</Badge>
               )}
             </TabsTrigger>
           </TabsList>
@@ -1022,6 +1069,86 @@ export default function Dashboard() {
                             <TableCell className="hidden md:table-cell text-xs text-slate-500">{a.turno}</TableCell>
                             <TableCell className="hidden lg:table-cell text-sm">{a.sector}</TableCell>
                             <TableCell className="hidden xl:table-cell text-sm">{a.empresa}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Exceso de Desayuno */}
+          <TabsContent value="desayuno">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Coffee className="h-5 w-5 text-amber-600" />
+                      Exceso de Desayuno
+                    </CardTitle>
+                    <CardDescription>
+                      Diferencias superiores a 25 minutos entre las 06:30 y 10:30 hs
+                      {breakfastExcess.length > 0 && ` — ${breakfastExcess.length} registro(s)`}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => fetchBreakfastExcess()} disabled={breakfastLoading}>
+                      <RefreshCw className={`h-4 w-4 ${breakfastLoading ? 'animate-spin' : ''}`} />
+                      Actualizar
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="w-20">Legajo</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-28">Fecha</TableHead>
+                        <TableHead className="w-20 text-center">H. Salida</TableHead>
+                        <TableHead className="w-20 text-center">H. Entrada</TableHead>
+                        <TableHead className="text-right">Duración Total</TableHead>
+                        <TableHead className="text-right">Exceso</TableHead>
+                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
+                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {breakfastLoading ? (
+                        Array.from({ length: 6 }).map((_, i) => (
+                          <TableRow key={i}>
+                            {Array.from({ length: 9 }).map((_, j) => (
+                              <TableCell key={j}>
+                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : breakfastExcess.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+                            No hay excesos de desayuno registrados
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        breakfastExcess.map((b, idx) => (
+                          <TableRow key={`${b.legajo}-${b.fecha}-${b.horaSalida}-${idx}`} className="hover:bg-amber-50/50 transition-colors">
+                            <TableCell className="font-mono text-sm">{b.legajo}</TableCell>
+                            <TableCell className="font-medium text-sm">{b.nombre}</TableCell>
+                            <TableCell className="text-sm">{formatDateDisplay(b.fecha)}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{b.horaSalida}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{b.horaEntrada}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">{formatHHMMSS(b.duracionTotal)}</TableCell>
+                            <TableCell className="text-right font-semibold font-mono text-sm text-red-600">
+                              +{formatHHMMSS(b.excesoMinutos)}
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell text-xs text-slate-500">{b.turno}</TableCell>
+                            <TableCell className="hidden md:table-cell text-xs text-slate-500">{b.sector}</TableCell>
                           </TableRow>
                         ))
                       )}
