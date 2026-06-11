@@ -132,7 +132,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Calcular duración con LAG sin jornada TN: cada fichada en su fecha real
-    // Para TN, se anula la duración cuando cruza la franja 06:00-18:00
+    // Para TN, se anula la duración cuando prev_hora está entre 06:00-10:00 (egreso fin de turno)
     const sql = `
       WITH raw_fichadas AS (
         SELECT * FROM "Fichada" ${whereClause}
@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
         SELECT *,
           CASE
             WHEN prev_hora IS NOT NULL
-              AND NOT (turno ILIKE 'TN%' AND prev_hora < '18:00:00' AND hora >= '18:00:00') THEN
+              AND NOT (turno ILIKE 'TN%' AND prev_hora >= '06:00:00' AND prev_hora < '10:00:00') THEN
               (EXTRACT(EPOCH FROM hora::time - prev_hora::time) / 60)
             ELSE NULL
           END as dur_min

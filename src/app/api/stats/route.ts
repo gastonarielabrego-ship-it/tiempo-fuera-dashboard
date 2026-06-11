@@ -81,7 +81,8 @@ export async function GET(request: NextRequest) {
         totalIngresos = counts[0].ingresos || 0;
       }
 
-      // Total minutos and promedio: sum of Ingreso durations sin jornada TN
+      // Total minutos y promedio: sum of Ingreso durations sin jornada TN
+      // Para TN, se anula duración cuando prev_hora entre 06:00-10:00
       const statsSql = `
         WITH raw_fichadas AS (
           SELECT * FROM "Fichada" ${whereClause}
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest) {
           SELECT *,
             CASE
               WHEN prev_hora IS NOT NULL
-                AND NOT (turno ILIKE 'TN%' AND prev_hora < '18:00:00' AND hora >= '18:00:00') THEN
+                AND NOT (turno ILIKE 'TN%' AND prev_hora >= '06:00:00' AND prev_hora < '10:00:00') THEN
                 (EXTRACT(EPOCH FROM hora::time - prev_hora::time) / 60)
               ELSE NULL
             END as dur_min
@@ -130,7 +131,7 @@ export async function GET(request: NextRequest) {
               SELECT *,
                 CASE
                   WHEN prev_hora IS NOT NULL
-                    AND NOT (turno ILIKE 'TN%' AND prev_hora < '18:00:00' AND hora >= '18:00:00') THEN
+                    AND NOT (turno ILIKE 'TN%' AND prev_hora >= '06:00:00' AND prev_hora < '10:00:00') THEN
                     (EXTRACT(EPOCH FROM hora::time - prev_hora::time) / 60)
                   ELSE NULL
                 END as dur_min
