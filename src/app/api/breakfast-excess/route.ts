@@ -63,34 +63,25 @@ export async function GET(request: NextRequest) {
       WITH raw_fichadas AS (
         SELECT * FROM "Fichada" ${whereClause}
       ),
-      with_jornada AS (
-        SELECT *,
-          CASE
-            WHEN turno ILIKE 'TN%' AND hora < '06:00:00' THEN
-              TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
-            ELSE "fecha"
-          END as jornada
-        FROM raw_fichadas
-      ),
       breakfast_window AS (
-        SELECT * FROM with_jornada
+        SELECT * FROM raw_fichadas
         WHERE hora >= '06:30:00' AND hora <= '10:30:00'
       ),
       with_next AS (
         SELECT *,
-          LEAD(hora) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_hora,
-          LEAD(tipo) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_tipo,
-          LEAD(nombre) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_nombre,
-          LEAD(sector) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_sector,
-          LEAD(empresa) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_empresa,
-          LEAD(turno) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as next_turno
+          LEAD(hora) OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as next_hora,
+          LEAD(tipo) OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as next_tipo,
+          LEAD(nombre) OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as next_nombre,
+          LEAD(sector) OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as next_sector,
+          LEAD(empresa) OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as next_empresa,
+          LEAD(turno) OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as next_turno
         FROM breakfast_window
       ),
       breakfast_pairs AS (
         SELECT
           legajo,
           nombre,
-          jornada as fecha,
+          "fecha",
           hora as hora_salida,
           next_hora as hora_entrada,
           turno,

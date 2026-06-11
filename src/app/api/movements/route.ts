@@ -86,39 +86,31 @@ export async function GET(request: NextRequest) {
       params.push(fechaHasta); pIdx++;
     }
 
-    // SQL con jornada TN: eventos TN desde 17:00→23:59 van al día siguiente
-    // así se unen con los de madrugada (00:00-09:59) que quedan con su fecha
+    // SQL sin jornada TN: cada fichada en su fecha real
+    // Para TN, se anula la duración cuando cruza la franja 06:00-18:00
     const sql = `
       WITH raw_fichadas AS (
         SELECT * FROM "Fichada" ${whereClause}
       ),
-      with_jornada AS (
-        SELECT *,
-          CASE
-            WHEN turno ILIKE 'TN%' AND hora < '06:00:00' THEN
-              TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
-            ELSE "fecha"
-          END as jornada
-        FROM raw_fichadas
-      ),
       ordered AS (
         SELECT *,
-          LAG(hora) OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as prev_hora,
-          ROW_NUMBER() OVER (PARTITION BY legajo, jornada ORDER BY "fecha", hora) as rn
-        FROM with_jornada
+          LAG(hora) OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as prev_hora,
+          ROW_NUMBER() OVER (PARTITION BY legajo, "fecha" ORDER BY hora) as rn
+        FROM raw_fichadas
       ),
       with_dur AS (
         SELECT *,
           CASE
-            WHEN prev_hora IS NOT NULL AND rn > 1 THEN
+            WHEN prev_hora IS NOT NULL AND rn > 1
+              AND NOT (turno ILIKE 'TN%' AND prev_hora < '18:00:00' AND hora >= '18:00:00') THEN
               ROUND(EXTRACT(EPOCH FROM hora::time - prev_hora::time) / 60, 2)
             ELSE NULL
           END as dur_min
         FROM ordered
       )
-      SELECT tipo, legajo, nombre, "fecha", hora, turno, sector, empresa, jornada, dur_min
+      SELECT tipo, legajo, nombre, "fecha", hora, turno, sector, empresa, dur_min
       FROM with_dur
-      ORDER BY jornada DESC, legajo ASC, "fecha" ASC, hora ASC
+      ORDER BY "fecha" DESC, legajo ASC, hora ASC
     `;
 
     const rows: any[] = params.length > 0
@@ -137,24 +129,19 @@ export async function GET(request: NextRequest) {
       duracionMinutos: r.dur_min,
     }));
 
-    // Unique names and dates (from jornada perspective)
+    // Unique names and dates
     const uniqueNames: any[] = await db.$queryRawUnsafe(
       `SELECT DISTINCT nombre FROM "Fichada" ORDER BY nombre ASC LIMIT 500`
     );
     const uniqueDates: any[] = await db.$queryRawUnsafe(
-      `SELECT DISTINCT
-        CASE WHEN turno ILIKE 'TN%' AND hora < '06:00:00'
-          THEN TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
-          ELSE "fecha"
-        END as jornada
-        FROM "Fichada" ORDER BY jornada DESC`
+      `SELECT DISTINCT "fecha" FROM "Fichada" ORDER BY "fecha" DESC`
     );
 
     return NextResponse.json({
       movements,
       total: movements.length,
       uniqueNames: uniqueNames.map((n: any) => n.nombre),
-      uniqueDates: uniqueDates.map((d: any) => d.jornada),
+      uniqueDates: uniqueDates.map((d: any) => d.fecha),
     });
   } catch (error) {
     console.error('Movements API error:', error);
