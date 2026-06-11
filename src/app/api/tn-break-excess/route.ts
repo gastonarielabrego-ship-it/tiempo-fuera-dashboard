@@ -63,8 +63,8 @@ export async function GET(request: NextRequest) {
       with_jornada AS (
         SELECT *,
           CASE
-            WHEN turno ILIKE 'TN%' AND hora >= '17:00:00' THEN
-              TO_CHAR(("fecha"::date + INTERVAL '1 day'), 'YYYY-MM-DD')
+            WHEN turno ILIKE 'TN%' AND hora < '06:00:00' THEN
+              TO_CHAR(("fecha"::date - INTERVAL '1 day'), 'YYYY-MM-DD')
             ELSE "fecha"
           END as jornada
         FROM raw_fichadas
