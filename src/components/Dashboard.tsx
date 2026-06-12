@@ -432,6 +432,11 @@ export default function Dashboard() {
     }
   }, [comidaSearch, comidaPage])
 
+  // Auto-fetch comida when tab is opened or search/page changes
+  useEffect(() => {
+    fetchComidaData()
+  }, [fetchComidaData])
+
   useEffect(() => {
     if (filters.fechaMin) {
       fetchAnomalies()

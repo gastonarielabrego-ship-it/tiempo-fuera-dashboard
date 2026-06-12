@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import * as XLSX from 'xlsx';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 15;
+export const maxDuration = 30;
 
 function toDate(d: any): string {
   if (d instanceof Date) {
@@ -108,19 +108,31 @@ export async function POST(request: NextRequest) {
     await db.$executeRawUnsafe(`DELETE FROM "Comida"`);
     console.log(`Deleted existing Comida data, inserting ${rows.length} rows...`);
 
-    const inserted: string[] = [];
-    for (const r of rows) {
-      const id = r.dni + '_' + r.fecha.replace(/-/g, '') + '_' + r.horario.replace(/:/g, '') + '_' + Math.random().toString(36).substring(2, 6);
+    // Batch insert: 100 rows per INSERT to avoid timeout
+    const BATCH_SIZE = 100;
+    let inserted = 0;
+
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      const valuesClauses: string[] = [];
+      const allParams: string[] = [];
+      let pIdx = 1;
+
+      for (const r of batch) {
+        const id = r.dni + '_' + r.fecha.replace(/-/g, '') + '_' + r.horario.replace(/:/g, '') + '_' + Math.random().toString(36).substring(2, 6);
+        valuesClauses.push(`($${pIdx}, $${pIdx + 1}, $${pIdx + 2}, $${pIdx + 3}, $${pIdx + 4})`);
+        allParams.push(id, r.dni, r.nombre, r.fecha, r.horario);
+        pIdx += 5;
+      }
+
       try {
         await db.$queryRawUnsafe(
-          `INSERT INTO "Comida" (id, dni, nombre, fecha, horario) VALUES ($1, $2, $3, $4, $5)`,
-          id, r.dni, r.nombre, r.fecha, r.horario
+          `INSERT INTO "Comida" (id, dni, nombre, fecha, horario) VALUES ${valuesClauses.join(', ')} ON CONFLICT (id) DO NOTHING`,
+          ...allParams
         );
-        inserted.push(id);
+        inserted += batch.length;
       } catch (e: any) {
-        if (!e.message?.includes('duplicate')) {
-          console.error('Error inserting row:', r, e);
-        }
+        console.error(`Error inserting batch ${i}-${i + BATCH_SIZE}:`, e.message);
       }
     }
 
