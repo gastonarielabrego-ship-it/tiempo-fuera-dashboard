@@ -262,6 +262,9 @@ export default function Dashboard() {
     }
 
     // --- Facial merge ---
+    // Stop words to skip in word-based matching (common Spanish name particles)
+    const STOP_WORDS = new Set(['DE', 'LA', 'DEL', 'EL', 'Y', 'SAN', 'SANTA', 'LAS', 'LOS', 'EN', 'A', 'E', 'CON', 'POR', 'PARA'])
+
     try {
       const fRes = await fetch('/api/facial/merge')
       const fData = await fRes.json()
@@ -273,39 +276,54 @@ export default function Dashboard() {
         const fApellido = (f.apellido || '').toUpperCase().trim()
         const fFecha = f.fecha
 
-        // Key strategy 1: full nombre_fecha (same as Comida)
-        const k1 = `${fNombre}_${fFecha}`
-        if (!fmap.has(k1)) fmap.set(k1, [])
-        fmap.get(k1)!.push(f)
-
-        // Key strategy 2: apellido_fecha
-        if (fApellido && fApellido !== fNombre) {
-          const k2 = `${fApellido}_${fFecha}`
-          if (!fmap.has(k2)) fmap.set(k2, [])
-          fmap.get(k2)!.push(f)
+        // Helper to add a key to the map
+        const addKey = (key: string) => {
+          if (!fmap.has(key)) fmap.set(key, [])
+          fmap.get(key)!.push(f)
         }
 
-        // Key strategy 3: each word of apellido (for compound surnames like "CEJAS BARROS")
+        // Key 1: full normalized nombre_fecha ("JUAN MANUEL DE LA IGLESIA_2026-06-11")
+        addKey(`${fNombre}_${fFecha}`)
+
+        // Key 2: apellido_fecha ("DE LA IGLESIA_2026-06-11")
+        if (fApellido && fApellido !== fNombre) {
+          addKey(`${fApellido}_${fFecha}`)
+        }
+
+        // Key 3: apellido without commas_fecha
+        const apNoComma = fApellido.replace(/,/g, '').trim()
+        if (apNoComma && apNoComma !== fApellido) {
+          addKey(`${apNoComma}_${fFecha}`)
+        }
+
+        // Key 4: meaningful words of apellido only (skip stop words)
         if (fApellido) {
-          const apWords = fApellido.split(/\s+/)
+          const apClean = fApellido.replace(/,/g, '').trim()
+          const apWords = apClean.split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w))
           for (const w of apWords) {
-            if (w && w !== fApellido) {
-              const kw = `${w}_${fFecha}`
-              if (!fmap.has(kw)) fmap.set(kw, [])
-              fmap.get(kw)!.push(f)
+            addKey(`${w}_${fFecha}`)
+          }
+          // Also try last word of apellido regardless (usually the core surname)
+          const allApWords = apClean.split(/\s+/).filter(w => w.length > 0)
+          if (allApWords.length > 0) {
+            const lastApWord = allApWords[allApWords.length - 1]
+            if (!STOP_WORDS.has(lastApWord)) {
+              addKey(`${lastApWord}_${fFecha}`)
             }
           }
         }
 
-        // Key strategy 4: last 2 words of nombre (for matching from fichada side)
+        // Key 5: last 2 words of nombre (for fuzzy matching)
         const nombreWords = fNombre.split(/\s+/)
         if (nombreWords.length >= 2) {
           const last2 = nombreWords.slice(-2).join(' ')
-          if (last2 !== fNombre) {
-            const k4 = `${last2}_${fFecha}`
-            if (!fmap.has(k4)) fmap.set(k4, [])
-            fmap.get(k4)!.push(f)
-          }
+          if (last2 !== fNombre) addKey(`${last2}_${fFecha}`)
+        }
+
+        // Key 6: original comma format "APELLIDO, NOMBRE" (in case fichada has same format)
+        const originalFormat = `${fApellido}, ${fNombre.replace(fApellido, '').trim()}`
+        if (originalFormat !== fNombre) {
+          addKey(`${originalFormat}_${fFecha}`)
         }
       }
       setFacialMovMerge(fmap)
@@ -702,7 +720,7 @@ export default function Dashboard() {
     }
 
     // Add facial rows matched by nombre (full) or apellido + fecha
-    // Build set of fichada name+fecha combos for reverse lookup too
+    const STOP_WORDS = new Set(['DE', 'LA', 'DEL', 'EL', 'Y', 'SAN', 'SANTA', 'LAS', 'LOS', 'EN', 'A', 'E', 'CON', 'POR', 'PARA'])
     const fichadaMovs = merged.filter(m => m.tipo !== 'Comida TK' && m.tipo !== 'Facial Entrada' && m.tipo !== 'Facial Salida')
 
     if (facialMovMerge.size > 0) {
@@ -711,32 +729,51 @@ export default function Dashboard() {
         const fecha = m.fecha
         let facials: any[] | undefined = undefined
 
-        // Strategy 1: exact full name match (same as Comida)
+        // Strategy 1: exact full name as-is
         facials = facialMovMerge.get(`${nombreFull}_${fecha}`)
 
-        // Strategy 2: each individual word of fichada name against map keys
+        // Strategy 2: normalize fichada name (remove comma, reorder APELLIDO, NOMBRE → NOMBRE APELLIDO)
         if (!facials || facials.length === 0) {
-          const words = nombreFull.split(/\s+/)
-          for (const w of words) {
-            facials = facialMovMerge.get(`${w}_${fecha}`)
-            if (facials && facials.length > 0) break
+          const commaIdx = nombreFull.indexOf(',')
+          if (commaIdx !== -1) {
+            const rawApellido = nombreFull.substring(0, commaIdx).trim()
+            const rawNombres = nombreFull.substring(commaIdx + 1).trim()
+            const normalized = `${rawNombres} ${rawApellido}`
+            facials = facialMovMerge.get(`${normalized}_${fecha}`)
           }
         }
 
-        // Strategy 3: last 2 words of fichada name
+        // Strategy 3: apellido part (before comma, if present) or last meaningful words
         if (!facials || facials.length === 0) {
-          const words = nombreFull.split(/\s+/)
-          if (words.length >= 2) {
-            const last2 = words.slice(-2).join(' ')
+          const commaIdx = nombreFull.indexOf(',')
+          let apellidoPart = ''
+          if (commaIdx !== -1) {
+            apellidoPart = nombreFull.substring(0, commaIdx).replace(/,/g, '').trim()
+          } else {
+            const words = nombreFull.split(/\s+/)
+            apellidoPart = words[words.length - 1] || ''
+          }
+          if (apellidoPart) {
+            facials = facialMovMerge.get(`${apellidoPart}_${fecha}`)
+          }
+        }
+
+        // Strategy 4: last 2 meaningful words (skip stop words)
+        if (!facials || facials.length === 0) {
+          const cleanName = nombreFull.replace(/,/g, '').trim()
+          const meaningfulWords = cleanName.split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w))
+          if (meaningfulWords.length >= 2) {
+            const last2 = meaningfulWords.slice(-2).join(' ')
             facials = facialMovMerge.get(`${last2}_${fecha}`)
           }
         }
 
-        // Strategy 4: last 3 words
+        // Strategy 5: last 3 meaningful words
         if (!facials || facials.length === 0) {
-          const words = nombreFull.split(/\s+/)
-          if (words.length >= 3) {
-            const last3 = words.slice(-3).join(' ')
+          const cleanName = nombreFull.replace(/,/g, '').trim()
+          const meaningfulWords = cleanName.split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w))
+          if (meaningfulWords.length >= 3) {
+            const last3 = meaningfulWords.slice(-3).join(' ')
             facials = facialMovMerge.get(`${last3}_${fecha}`)
           }
         }
