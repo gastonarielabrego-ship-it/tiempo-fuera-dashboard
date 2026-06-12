@@ -241,6 +241,44 @@ export default function Dashboard() {
     }
   }
 
+  // Dedicated function to refresh merge maps for Movimientos tab
+  // Fetches ALL comida and facial data (no date filter) for correct matching
+  const refreshMergeData = useCallback(async () => {
+    try {
+      const cRes = await fetch('/api/comida?pageSize=9999')
+      const cData = await cRes.json()
+      const cmap = new Map<string, any[]>()
+      for (const c of (cData.data || [])) {
+        const key = `${(c.nombre || '').toUpperCase().trim()}_${c.fecha}`
+        if (!cmap.has(key)) cmap.set(key, [])
+        cmap.get(key)!.push(c)
+      }
+      setComidaMovMerge(cmap)
+    } catch (e) { /* silent */ }
+
+    try {
+      const fRes = await fetch('/api/facial?pageSize=9999')
+      const fData = await fRes.json()
+      const fmap = new Map<string, any[]>()
+      for (const f of (fData.data || [])) {
+        const nombreKey = `${(f.nombre || '').toUpperCase().trim()}_${f.fecha}`
+        const apellidoKey = `${(f.apellido || '').toUpperCase().trim()}_${f.fecha}`
+        if (!fmap.has(nombreKey)) fmap.set(nombreKey, [])
+        fmap.get(nombreKey)!.push(f)
+        if (!fmap.has(apellidoKey)) fmap.set(apellidoKey, [])
+        fmap.get(apellidoKey)!.push(f)
+        const apParts = (f.apellido || '').toUpperCase().trim().split(/\s+/)
+        if (apParts.length > 1) {
+          const lastWord = apParts[apParts.length - 1]
+          const lwKey = `${lastWord}_${f.fecha}`
+          if (!fmap.has(lwKey)) fmap.set(lwKey, [])
+          fmap.get(lwKey)!.push(f)
+        }
+      }
+      setFacialMovMerge(fmap)
+    } catch (e) { /* silent */ }
+  }, [])
+
   const clearFilters = () => {
     setSectorFilter([])
     setEmpresaFilter([])
@@ -269,6 +307,7 @@ export default function Dashboard() {
       if (res.ok) {
         toast.success(data.message || `${data.inserted} registros de comida cargados`)
         fetchComidaData()
+        await refreshMergeData()
       } else {
         toast.error(`Error: ${data.error}`)
       }
@@ -299,7 +338,7 @@ export default function Dashboard() {
       if (res.ok) {
         toast.success(data.message || `${data.inserted} registros de facial cargados`)
         fetchFacialData()
-        fetchAllMovements()
+        await refreshMergeData()
       } else {
         toast.error(`Error: ${data.error}`)
       }
@@ -332,57 +371,8 @@ export default function Dashboard() {
       setMovAutoNames(data.uniqueNames || [])
       setMovUniqueDates(data.uniqueDates || [])
 
-      // Also fetch comida for the same date range to merge into movements
-      try {
-        const cParams = new URLSearchParams()
-        if (fechaDesde) cParams.set('fechaDesde', toISODate(fechaDesde))
-        if (fechaHasta) cParams.set('fechaHasta', toISODate(fechaHasta))
-        cParams.set('pageSize', '9999')
-        const cRes = await fetch(`/api/comida?${cParams}`)
-        const cData = await cRes.json()
-        // Build map: key = nombre_fecha -> array of comida records
-        const map = new Map<string, any[]>()
-        for (const c of (cData.data || [])) {
-          const key = `${c.nombre.toUpperCase().trim()}_${c.fecha}`
-          if (!map.has(key)) map.set(key, [])
-          map.get(key)!.push(c)
-        }
-        setComidaMovMerge(map)
-      } catch (e) {
-        console.error('Error fetching comida for movements:', e)
-      }
-
-      // Also fetch facial for the same date range to merge into movements
-      try {
-        const fParams = new URLSearchParams()
-        if (fechaDesde) fParams.set('fechaDesde', toISODate(fechaDesde))
-        if (fechaHasta) fParams.set('fechaHasta', toISODate(fechaHasta))
-        fParams.set('pageSize', '9999')
-        const fRes = await fetch(`/api/facial?${fParams}`)
-        const fData = await fRes.json()
-        // Build map with TWO keys: nombre_fecha AND apellido_fecha
-        const fmap = new Map<string, any[]>()
-        for (const f of (fData.data || [])) {
-          const nombreKey = `${(f.nombre || '').toUpperCase().trim()}_${f.fecha}`
-          const apellidoKey = `${(f.apellido || '').toUpperCase().trim()}_${f.fecha}`
-          // Also try each word of apellido for compound surnames
-          if (!fmap.has(nombreKey)) fmap.set(nombreKey, [])
-          fmap.get(nombreKey)!.push(f)
-          if (!fmap.has(apellidoKey)) fmap.set(apellidoKey, [])
-          fmap.get(apellidoKey)!.push(f)
-          // For compound surnames like "CEJAS BARROS", also index by last word
-          const apParts = (f.apellido || '').toUpperCase().trim().split(/\s+/)
-          if (apParts.length > 1) {
-            const lastWord = apParts[apParts.length - 1]
-            const lwKey = `${lastWord}_${f.fecha}`
-            if (!fmap.has(lwKey)) fmap.set(lwKey, [])
-            fmap.get(lwKey)!.push(f)
-          }
-        }
-        setFacialMovMerge(fmap)
-      } catch (e) {
-        console.error('Error fetching facial for movements:', e)
-      }
+      // Refresh merge maps (comida + facial) for this data
+      await refreshMergeData()
     } catch (err) {
       console.error('Error fetching movements:', err)
     } finally {
@@ -403,35 +393,6 @@ export default function Dashboard() {
       setMovements(data.movements)
       setMovAutoNames(data.uniqueNames || [])
       setMovUniqueDates(data.uniqueDates || [])
-
-      // Re-fetch facial for merge
-      try {
-        const fParams = new URLSearchParams()
-        if (fechaDesde) fParams.set('fechaDesde', toISODate(fechaDesde))
-        if (fechaHasta) fParams.set('fechaHasta', toISODate(fechaHasta))
-        fParams.set('pageSize', '9999')
-        const fRes = await fetch(`/api/facial?${fParams}`)
-        const fData = await fRes.json()
-        const fmap = new Map<string, any[]>()
-        for (const f of (fData.data || [])) {
-          const nombreKey = `${(f.nombre || '').toUpperCase().trim()}_${f.fecha}`
-          const apellidoKey = `${(f.apellido || '').toUpperCase().trim()}_${f.fecha}`
-          if (!fmap.has(nombreKey)) fmap.set(nombreKey, [])
-          fmap.get(nombreKey)!.push(f)
-          if (!fmap.has(apellidoKey)) fmap.set(apellidoKey, [])
-          fmap.get(apellidoKey)!.push(f)
-          const apParts = (f.apellido || '').toUpperCase().trim().split(/\s+/)
-          if (apParts.length > 1) {
-            const lastWord = apParts[apParts.length - 1]
-            const lwKey = `${lastWord}_${f.fecha}`
-            if (!fmap.has(lwKey)) fmap.set(lwKey, [])
-            fmap.get(lwKey)!.push(f)
-          }
-        }
-        setFacialMovMerge(fmap)
-      } catch (e) {
-        console.error('Error fetching facial for movements:', e)
-      }
     } catch (err) {
       toast.error('Error al buscar movimientos')
     } finally {
@@ -561,6 +522,9 @@ export default function Dashboard() {
   useEffect(() => {
     fetchComidaData()
   }, [fetchComidaData])
+
+  // Load merge data on mount
+  useEffect(() => { refreshMergeData() }, [refreshMergeData])
 
   const fetchFacialData = useCallback(async () => {
     setFacialLoading(true)
