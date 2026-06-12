@@ -298,6 +298,26 @@ export default function Dashboard() {
       setMovements(data.movements)
       setMovAutoNames(data.uniqueNames || [])
       setMovUniqueDates(data.uniqueDates || [])
+
+      // Also fetch comida for the same date range to merge into movements
+      try {
+        const cParams = new URLSearchParams()
+        if (fechaDesde) cParams.set('fechaDesde', toISODate(fechaDesde))
+        if (fechaHasta) cParams.set('fechaHasta', toISODate(fechaHasta))
+        cParams.set('pageSize', '9999')
+        const cRes = await fetch(`/api/comida?${cParams}`)
+        const cData = await cRes.json()
+        // Build map: key = nombre_fecha -> array of comida records
+        const map = new Map<string, any[]>()
+        for (const c of (cData.data || [])) {
+          const key = `${c.nombre.toUpperCase().trim()}_${c.fecha}`
+          if (!map.has(key)) map.set(key, [])
+          map.get(key)!.push(c)
+        }
+        setComidaMovMerge(map)
+      } catch (e) {
+        console.error('Error fetching comida for movements:', e)
+      }
     } catch (err) {
       console.error('Error fetching movements:', err)
     } finally {
@@ -348,6 +368,7 @@ export default function Dashboard() {
 
   // Comida state
   const [comidaData, setComidaData] = useState<any[]>([])
+  const [comidaMovMerge, setComidaMovMerge] = useState<Map<string, any[]>>(new Map())
   const [comidaTotal, setComidaTotal] = useState(0)
   const [comidaPage, setComidaPage] = useState(1)
   const [comidaTotalPages, setComidaTotalPages] = useState(0)
@@ -502,11 +523,51 @@ export default function Dashboard() {
 
   const fechasCargadas = movUniqueDates.length > 0 ? movUniqueDates.sort().map(formatDateDisplay) : []
 
-  const filteredMovements = movements.filter(m => {
-    if (movNombre && !m.nombre.toLowerCase().includes(movNombre.toLowerCase()) && !m.legajo.includes(movNombre)) return false
-    if (movFecha && m.fecha !== movFecha) return false
-    return true
-  })
+  const filteredMovements = useMemo(() => {
+    // Merge comida records into movements
+    const merged: MovementItem[] = []
+    const usedComida = new Set<string>()
+
+    for (const m of movements) {
+      if (movNombre && !m.nombre.toLowerCase().includes(movNombre.toLowerCase()) && !m.legajo.includes(movNombre)) continue
+      if (movFecha && m.fecha !== movFecha) continue
+      merged.push(m)
+    }
+
+    // Add comida rows matched by nombre and fecha
+    for (const m of merged) {
+      const key = `${m.nombre.toUpperCase().trim()}_${m.fecha}`
+      const comidas = comidaMovMerge.get(key)
+      if (comidas) {
+        for (const c of comidas) {
+          const cKey = `${c.dni}_${c.fecha}_${c.horario}`
+          if (!usedComida.has(cKey)) {
+            usedComida.add(cKey)
+            merged.push({
+              tipo: 'Comida TK',
+              legajo: '',
+              nombre: m.nombre,
+              fecha: c.fecha,
+              hora: c.horario,
+              turno: '',
+              sector: '',
+              empresa: '',
+              duracionMinutos: null,
+            })
+          }
+        }
+      }
+    }
+
+    // Sort by fecha DESC, then hora ASC (comida rows interleave correctly)
+    merged.sort((a, b) => {
+      if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha)
+      if (a.legajo && b.legajo && a.legajo !== b.legajo) return a.legajo.localeCompare(b.legajo)
+      return a.hora.localeCompare(b.hora)
+    })
+
+    return merged
+  }, [movements, movNombre, movFecha, comidaMovMerge])
 
   const totalFichadas = movements.length
   const egresosCount = movements.filter(m => m.tipo === 'Salida Depo').length
@@ -1043,14 +1104,18 @@ export default function Dashboard() {
                         filteredMovements.map((m, idx) => (
                           <TableRow
                             key={`${m.legajo}-${m.fecha}-${m.hora}-${m.tipo}-${idx}`}
-                            className={m.tipo === 'Salida Depo' ? 'bg-red-50/50' : 'bg-green-50/50'}
+                            className={m.tipo === 'Comida TK' ? 'bg-emerald-100/70' : m.tipo === 'Salida Depo' ? 'bg-red-50/50' : 'bg-green-50/50'}
                           >
                             <TableCell>
-                              <Badge variant={m.tipo === 'Salida Depo' ? 'destructive' : 'default'} className="text-xs">
-                                {m.tipo === 'Salida Depo' ? 'Egreso' : 'Ingreso'}
-                              </Badge>
+                              {m.tipo === 'Comida TK' ? (
+                                <Badge className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white">Comida TK</Badge>
+                              ) : (
+                                <Badge variant={m.tipo === 'Salida Depo' ? 'destructive' : 'default'} className="text-xs">
+                                  {m.tipo === 'Salida Depo' ? 'Egreso' : 'Ingreso'}
+                                </Badge>
+                              )}
                             </TableCell>
-                            <TableCell className="font-mono text-sm">{m.legajo}</TableCell>
+                            <TableCell className="font-mono text-sm">{m.legajo || '-'}</TableCell>
                             <TableCell className="font-medium text-sm">{m.nombre}</TableCell>
                             <TableCell className="text-sm">{formatDateDisplay(m.fecha)}</TableCell>
                             <TableCell className="text-center font-mono text-sm">{m.hora}</TableCell>
