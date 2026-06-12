@@ -360,12 +360,24 @@ export default function Dashboard() {
         fParams.set('pageSize', '9999')
         const fRes = await fetch(`/api/facial?${fParams}`)
         const fData = await fRes.json()
-        // Build map: key = apellido_fecha -> array of facial records
+        // Build map with TWO keys: nombre_fecha AND apellido_fecha
         const fmap = new Map<string, any[]>()
         for (const f of (fData.data || [])) {
-          const key = `${f.apellido.toUpperCase().trim()}_${f.fecha}`
-          if (!fmap.has(key)) fmap.set(key, [])
-          fmap.get(key)!.push(f)
+          const nombreKey = `${(f.nombre || '').toUpperCase().trim()}_${f.fecha}`
+          const apellidoKey = `${(f.apellido || '').toUpperCase().trim()}_${f.fecha}`
+          // Also try each word of apellido for compound surnames
+          if (!fmap.has(nombreKey)) fmap.set(nombreKey, [])
+          fmap.get(nombreKey)!.push(f)
+          if (!fmap.has(apellidoKey)) fmap.set(apellidoKey, [])
+          fmap.get(apellidoKey)!.push(f)
+          // For compound surnames like "CEJAS BARROS", also index by last word
+          const apParts = (f.apellido || '').toUpperCase().trim().split(/\s+/)
+          if (apParts.length > 1) {
+            const lastWord = apParts[apParts.length - 1]
+            const lwKey = `${lastWord}_${f.fecha}`
+            if (!fmap.has(lwKey)) fmap.set(lwKey, [])
+            fmap.get(lwKey)!.push(f)
+          }
         }
         setFacialMovMerge(fmap)
       } catch (e) {
@@ -391,6 +403,35 @@ export default function Dashboard() {
       setMovements(data.movements)
       setMovAutoNames(data.uniqueNames || [])
       setMovUniqueDates(data.uniqueDates || [])
+
+      // Re-fetch facial for merge
+      try {
+        const fParams = new URLSearchParams()
+        if (fechaDesde) fParams.set('fechaDesde', toISODate(fechaDesde))
+        if (fechaHasta) fParams.set('fechaHasta', toISODate(fechaHasta))
+        fParams.set('pageSize', '9999')
+        const fRes = await fetch(`/api/facial?${fParams}`)
+        const fData = await fRes.json()
+        const fmap = new Map<string, any[]>()
+        for (const f of (fData.data || [])) {
+          const nombreKey = `${(f.nombre || '').toUpperCase().trim()}_${f.fecha}`
+          const apellidoKey = `${(f.apellido || '').toUpperCase().trim()}_${f.fecha}`
+          if (!fmap.has(nombreKey)) fmap.set(nombreKey, [])
+          fmap.get(nombreKey)!.push(f)
+          if (!fmap.has(apellidoKey)) fmap.set(apellidoKey, [])
+          fmap.get(apellidoKey)!.push(f)
+          const apParts = (f.apellido || '').toUpperCase().trim().split(/\s+/)
+          if (apParts.length > 1) {
+            const lastWord = apParts[apParts.length - 1]
+            const lwKey = `${lastWord}_${f.fecha}`
+            if (!fmap.has(lwKey)) fmap.set(lwKey, [])
+            fmap.get(lwKey)!.push(f)
+          }
+        }
+        setFacialMovMerge(fmap)
+      } catch (e) {
+        console.error('Error fetching facial for movements:', e)
+      }
     } catch (err) {
       toast.error('Error al buscar movimientos')
     } finally {
@@ -647,14 +688,29 @@ export default function Dashboard() {
       }
     }
 
-    // Add facial rows matched by apellido (last word of nombre) and fecha
-    for (const m of merged) {
-      if (m.tipo === 'Comida TK' || m.tipo === 'Facial Entrada' || m.tipo === 'Facial Salida') continue
-      const nameParts = m.nombre.trim().toUpperCase().split(/\s+/)
-      const apellido = nameParts[nameParts.length - 1] || ''
-      if (!apellido) continue
-      const fKey = `${apellido}_${m.fecha}`
-      const facials = facialMovMerge.get(fKey)
+    // Add facial rows matched by nombre (full) or apellido + fecha
+    // First collect all fichada movements (skip non-fichada)
+    const fichadaMovs = merged.filter(m => m.tipo !== 'Comida TK' && m.tipo !== 'Facial Entrada' && m.tipo !== 'Facial Salida')
+    for (const m of fichadaMovs) {
+      const nombreFull = m.nombre.toUpperCase().trim()
+      // Try 1: exact full name match
+      let facials = facialMovMerge.get(`${nombreFull}_${m.fecha}`)
+      // Try 2: apellido (last word)
+      if (!facials || facials.length === 0) {
+        const nameParts = nombreFull.split(/\s+/)
+        const apellido = nameParts[nameParts.length - 1] || ''
+        if (apellido) {
+          facials = facialMovMerge.get(`${apellido}_${m.fecha}`)
+        }
+      }
+      // Try 3: last 2 words (for compound names like "JESUS CEJAS BARROS" matching "CEJAS BARROS")
+      if (!facials || facials.length === 0) {
+        const nameParts = nombreFull.split(/\s+/)
+        if (nameParts.length >= 2) {
+          const last2 = nameParts.slice(-2).join(' ')
+          facials = facialMovMerge.get(`${last2}_${m.fecha}`)
+        }
+      }
       if (facials) {
         for (const f of facials) {
           const fIdKey = `${f.dni}_${f.fecha}_${f.horario}_${f.zona}`

@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     const dataSql = `
       SELECT "nombre", "apellido", "dni", "fecha", "horario", "zona"
       FROM "Facial" ${whereClause}
-      ORDER BY "fecha" DESC, "horario" ASC, "nombre" ASC
+      ORDER BY "nombre" ASC, "fecha" DESC
       LIMIT ${pageSize} OFFSET ${offset}
     `;
 
