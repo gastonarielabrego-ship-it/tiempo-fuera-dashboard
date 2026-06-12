@@ -242,41 +242,77 @@ export default function Dashboard() {
   }
 
   // Dedicated function to refresh merge maps for Movimientos tab
-  // Fetches ALL comida and facial data (no date filter) for correct matching
+  // Uses lightweight /merge endpoints (single query, no pagination/counts)
   const refreshMergeData = useCallback(async () => {
+    // --- Comida merge ---
     try {
-      const cRes = await fetch('/api/comida?pageSize=9999')
+      const cRes = await fetch('/api/comida/merge')
       const cData = await cRes.json()
       const cmap = new Map<string, any[]>()
-      for (const c of (cData.data || [])) {
+      const cRecords = cData.data || []
+      for (const c of cRecords) {
         const key = `${(c.nombre || '').toUpperCase().trim()}_${c.fecha}`
         if (!cmap.has(key)) cmap.set(key, [])
         cmap.get(key)!.push(c)
       }
       setComidaMovMerge(cmap)
-    } catch (e) { /* silent */ }
+      console.log('[merge] Comida loaded:', cRecords.length, 'records')
+    } catch (e) {
+      console.error('[merge] Comida error:', e)
+    }
 
+    // --- Facial merge ---
     try {
-      const fRes = await fetch('/api/facial?pageSize=9999')
+      const fRes = await fetch('/api/facial/merge')
       const fData = await fRes.json()
       const fmap = new Map<string, any[]>()
-      for (const f of (fData.data || [])) {
-        const nombreKey = `${(f.nombre || '').toUpperCase().trim()}_${f.fecha}`
-        const apellidoKey = `${(f.apellido || '').toUpperCase().trim()}_${f.fecha}`
-        if (!fmap.has(nombreKey)) fmap.set(nombreKey, [])
-        fmap.get(nombreKey)!.push(f)
-        if (!fmap.has(apellidoKey)) fmap.set(apellidoKey, [])
-        fmap.get(apellidoKey)!.push(f)
-        const apParts = (f.apellido || '').toUpperCase().trim().split(/\s+/)
-        if (apParts.length > 1) {
-          const lastWord = apParts[apParts.length - 1]
-          const lwKey = `${lastWord}_${f.fecha}`
-          if (!fmap.has(lwKey)) fmap.set(lwKey, [])
-          fmap.get(lwKey)!.push(f)
+      const fRecords = fData.data || []
+      console.log('[merge] Facial loaded:', fRecords.length, 'records')
+      for (const f of fRecords) {
+        const fNombre = (f.nombre || '').toUpperCase().trim()
+        const fApellido = (f.apellido || '').toUpperCase().trim()
+        const fFecha = f.fecha
+
+        // Key strategy 1: full nombre_fecha (same as Comida)
+        const k1 = `${fNombre}_${fFecha}`
+        if (!fmap.has(k1)) fmap.set(k1, [])
+        fmap.get(k1)!.push(f)
+
+        // Key strategy 2: apellido_fecha
+        if (fApellido && fApellido !== fNombre) {
+          const k2 = `${fApellido}_${fFecha}`
+          if (!fmap.has(k2)) fmap.set(k2, [])
+          fmap.get(k2)!.push(f)
+        }
+
+        // Key strategy 3: each word of apellido (for compound surnames like "CEJAS BARROS")
+        if (fApellido) {
+          const apWords = fApellido.split(/\s+/)
+          for (const w of apWords) {
+            if (w && w !== fApellido) {
+              const kw = `${w}_${fFecha}`
+              if (!fmap.has(kw)) fmap.set(kw, [])
+              fmap.get(kw)!.push(f)
+            }
+          }
+        }
+
+        // Key strategy 4: last 2 words of nombre (for matching from fichada side)
+        const nombreWords = fNombre.split(/\s+/)
+        if (nombreWords.length >= 2) {
+          const last2 = nombreWords.slice(-2).join(' ')
+          if (last2 !== fNombre) {
+            const k4 = `${last2}_${fFecha}`
+            if (!fmap.has(k4)) fmap.set(k4, [])
+            fmap.get(k4)!.push(f)
+          }
         }
       }
       setFacialMovMerge(fmap)
-    } catch (e) { /* silent */ }
+      console.log('[merge] Facial map keys:', fmap.size)
+    } catch (e) {
+      console.error('[merge] Facial error:', e)
+    }
   }, [])
 
   const clearFilters = () => {
@@ -307,6 +343,7 @@ export default function Dashboard() {
       if (res.ok) {
         toast.success(data.message || `${data.inserted} registros de comida cargados`)
         fetchComidaData()
+        fetchComidaCounts()
         await refreshMergeData()
       } else {
         toast.error(`Error: ${data.error}`)
@@ -430,6 +467,7 @@ export default function Dashboard() {
   const [comidaLoading, setComidaLoading] = useState(false)
   const [comidaSearch, setComidaSearch] = useState('')
   const [comidaSummary, setComidaSummary] = useState({ trabajadores: 0, dias: 0 })
+  const [comidaCounts, setComidaCounts] = useState<{ nombre: string; total_tk: number }[]>([])
 
   // Facial state
   const [facialData, setFacialData] = useState<any[]>([])
@@ -523,8 +561,19 @@ export default function Dashboard() {
     fetchComidaData()
   }, [fetchComidaData])
 
+  // Fetch comida per-person counts
+  const fetchComidaCounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/comida/count-by-person')
+      const data = await res.json()
+      setComidaCounts(data.data || [])
+    } catch (err) {
+      console.error('Error fetching comida counts:', err)
+    }
+  }, [])
+
   // Load merge data on mount
-  useEffect(() => { refreshMergeData() }, [refreshMergeData])
+  useEffect(() => { refreshMergeData(); fetchComidaCounts() }, [refreshMergeData, fetchComidaCounts])
 
   const fetchFacialData = useCallback(async () => {
     setFacialLoading(true)
@@ -653,45 +702,63 @@ export default function Dashboard() {
     }
 
     // Add facial rows matched by nombre (full) or apellido + fecha
-    // First collect all fichada movements (skip non-fichada)
+    // Build set of fichada name+fecha combos for reverse lookup too
     const fichadaMovs = merged.filter(m => m.tipo !== 'Comida TK' && m.tipo !== 'Facial Entrada' && m.tipo !== 'Facial Salida')
-    for (const m of fichadaMovs) {
-      const nombreFull = m.nombre.toUpperCase().trim()
-      // Try 1: exact full name match
-      let facials = facialMovMerge.get(`${nombreFull}_${m.fecha}`)
-      // Try 2: apellido (last word)
-      if (!facials || facials.length === 0) {
-        const nameParts = nombreFull.split(/\s+/)
-        const apellido = nameParts[nameParts.length - 1] || ''
-        if (apellido) {
-          facials = facialMovMerge.get(`${apellido}_${m.fecha}`)
+
+    if (facialMovMerge.size > 0) {
+      for (const m of fichadaMovs) {
+        const nombreFull = m.nombre.toUpperCase().trim()
+        const fecha = m.fecha
+        let facials: any[] | undefined = undefined
+
+        // Strategy 1: exact full name match (same as Comida)
+        facials = facialMovMerge.get(`${nombreFull}_${fecha}`)
+
+        // Strategy 2: each individual word of fichada name against map keys
+        if (!facials || facials.length === 0) {
+          const words = nombreFull.split(/\s+/)
+          for (const w of words) {
+            facials = facialMovMerge.get(`${w}_${fecha}`)
+            if (facials && facials.length > 0) break
+          }
         }
-      }
-      // Try 3: last 2 words (for compound names like "JESUS CEJAS BARROS" matching "CEJAS BARROS")
-      if (!facials || facials.length === 0) {
-        const nameParts = nombreFull.split(/\s+/)
-        if (nameParts.length >= 2) {
-          const last2 = nameParts.slice(-2).join(' ')
-          facials = facialMovMerge.get(`${last2}_${m.fecha}`)
+
+        // Strategy 3: last 2 words of fichada name
+        if (!facials || facials.length === 0) {
+          const words = nombreFull.split(/\s+/)
+          if (words.length >= 2) {
+            const last2 = words.slice(-2).join(' ')
+            facials = facialMovMerge.get(`${last2}_${fecha}`)
+          }
         }
-      }
-      if (facials) {
-        for (const f of facials) {
-          const fIdKey = `${f.dni}_${f.fecha}_${f.horario}_${f.zona}`
-          if (!usedFacial.has(fIdKey)) {
-            usedFacial.add(fIdKey)
-            const tipo = f.zona.includes('Entrada') ? 'Facial Entrada' : 'Facial Salida'
-            merged.push({
-              tipo,
-              legajo: '',
-              nombre: m.nombre,
-              fecha: f.fecha,
-              hora: f.horario,
-              turno: '',
-              sector: '',
-              empresa: '',
-              duracionMinutos: null,
-            })
+
+        // Strategy 4: last 3 words
+        if (!facials || facials.length === 0) {
+          const words = nombreFull.split(/\s+/)
+          if (words.length >= 3) {
+            const last3 = words.slice(-3).join(' ')
+            facials = facialMovMerge.get(`${last3}_${fecha}`)
+          }
+        }
+
+        if (facials && facials.length > 0) {
+          for (const f of facials) {
+            const fIdKey = `${f.dni}_${f.fecha}_${f.horario}_${f.zona}`
+            if (!usedFacial.has(fIdKey)) {
+              usedFacial.add(fIdKey)
+              const tipo = f.zona.includes('Entrada') ? 'Facial Entrada' : 'Facial Salida'
+              merged.push({
+                tipo,
+                legajo: '',
+                nombre: m.nombre,
+                fecha: f.fecha,
+                hora: f.horario,
+                turno: '',
+                sector: '',
+                empresa: '',
+                duracionMinutos: null,
+              })
+            }
           }
         }
       }
@@ -1598,6 +1665,41 @@ export default function Dashboard() {
                   </div>
                 </div>
               </CardHeader>
+              {/* TK Counter per collaborator */}
+              {comidaCounts.length > 0 && (
+                <div className="px-4 pb-3">
+                  <div className="rounded-lg border bg-gradient-to-r from-orange-50 to-amber-50 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <UtensilsCrossed className="h-4 w-4 text-orange-600" />
+                      <span className="text-sm font-semibold text-orange-800">Contador de TK por Colaborador</span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-orange-100 hover:bg-transparent">
+                            <TableHead className="text-xs text-orange-700">#</TableHead>
+                            <TableHead className="text-xs text-orange-700">Colaborador</TableHead>
+                            <TableHead className="text-xs text-orange-700 text-center w-24">TK Retirados</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {comidaCounts.map((c, idx) => (
+                            <TableRow key={c.nombre} className="border-orange-50 hover:bg-orange-100/50">
+                              <TableCell className="text-xs text-slate-500">{idx + 1}</TableCell>
+                              <TableCell className="text-sm font-medium">{c.nombre}</TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="bg-orange-100 text-orange-700 border-orange-200 font-bold text-sm">
+                                  {c.total_tk}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </div>
+              )}
               <CardContent className="p-0">
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                   <Table>
