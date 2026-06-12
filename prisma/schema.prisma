@@ -59,3 +59,15 @@ model Fichada {
   @@index([legajo, fecha])
   @@index([fecha])
 }
+
+model Comida {
+  id        String   @id @default(cuid())
+  dni       String
+  nombre    String
+  fecha     String
+  horario   String
+  createdAt DateTime @default(now())
+
+  @@index([dni, fecha])
+  @@index([fecha])
+}

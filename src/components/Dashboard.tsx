@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Upload, Clock, Users, TrendingUp, Search, Trophy,
-  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee, Moon
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee, Moon, UtensilsCrossed
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -133,6 +133,8 @@ export default function Dashboard() {
   const [filters, setFilters] = useState<FilterData>({ sectores: [], empresas: [], fechaMin: '', fechaMax: '' })
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [uploadingComida, setUploadingComida] = useState(false)
+  const comidaFileRef = useRef<HTMLInputElement>(null)
 
   // Filter state
   const [sectorFilter, setSectorFilter] = useState<string[]>([])
@@ -246,6 +248,36 @@ export default function Dashboard() {
     setFechaHasta('')
   }
 
+  const handleComidaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingComida(true)
+    try {
+      toast.info('Procesando archivo de comida...')
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/comida/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+
+      if (res.ok) {
+        toast.success(data.message || `${data.inserted} registros de comida cargados`)
+        fetchComidaData()
+      } else {
+        toast.error(`Error: ${data.error}`)
+      }
+    } catch (err) {
+      toast.error('Error al procesar comida: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setUploadingComida(false)
+      if (comidaFileRef.current) comidaFileRef.current.value = ''
+    }
+  }
+
   // Movements state
   const [movements, setMovements] = useState<MovementItem[]>([])
   const [movLoading, setMovLoading] = useState(false)
@@ -314,6 +346,15 @@ export default function Dashboard() {
   const [tnBreakExcess, setTnBreakExcess] = useState<BreakfastExcessItem[]>([])
   const [tnBreakLoading, setTnBreakLoading] = useState(false)
 
+  // Comida state
+  const [comidaData, setComidaData] = useState<any[]>([])
+  const [comidaTotal, setComidaTotal] = useState(0)
+  const [comidaPage, setComidaPage] = useState(1)
+  const [comidaTotalPages, setComidaTotalPages] = useState(0)
+  const [comidaLoading, setComidaLoading] = useState(false)
+  const [comidaSearch, setComidaSearch] = useState('')
+  const [comidaSummary, setComidaSummary] = useState({ trabajadores: 0, dias: 0 })
+
   const fetchAnomalies = useCallback(async () => {
     setAnomLoading(true)
     try {
@@ -371,6 +412,25 @@ export default function Dashboard() {
       setTnBreakLoading(false)
     }
   }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
+
+  const fetchComidaData = useCallback(async () => {
+    setComidaLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (comidaSearch) params.set('search', comidaSearch)
+      params.set('page', String(comidaPage))
+      const res = await fetch(`/api/comida?${params}`)
+      const data = await res.json()
+      setComidaData(data.data || [])
+      setComidaTotal(data.total || 0)
+      setComidaTotalPages(data.totalPages || 0)
+      setComidaSummary(data.summary || { trabajadores: 0, dias: 0 })
+    } catch (err) {
+      console.error('Error fetching comida:', err)
+    } finally {
+      setComidaLoading(false)
+    }
+  }, [comidaSearch, comidaPage])
 
   useEffect(() => {
     if (filters.fechaMin) {
@@ -469,7 +529,18 @@ export default function Dashboard() {
             />
             <Button variant="outline" size="sm" className="gap-2" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
               {uploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              {uploading ? 'Procesando...' : 'Cargar Archivo Excel'}
+              {uploading ? 'Procesando...' : 'Cargar Fichadas'}
+            </Button>
+            <input
+              ref={comidaFileRef}
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleComidaUpload}
+              className="hidden"
+            />
+            <Button variant="outline" size="sm" className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50" disabled={uploadingComida} onClick={() => comidaFileRef.current?.click()}>
+              {uploadingComida ? <RefreshCw className="h-4 w-4 animate-spin" /> : <UtensilsCrossed className="h-4 w-4" />}
+              {uploadingComida ? 'Procesando...' : 'Cargar Comida'}
             </Button>
           </div>
         </div>
@@ -721,6 +792,10 @@ export default function Dashboard() {
               {tnBreakExcess.length > 0 && (
                 <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{tnBreakExcess.length}</Badge>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="comida" className="gap-2">
+              <UtensilsCrossed className="h-4 w-4" />
+              Horario Comida
             </TabsTrigger>
           </TabsList>
 
@@ -1263,6 +1338,90 @@ export default function Dashboard() {
                     </TableBody>
                   </Table>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Horario Comida */}
+          <TabsContent value="comida">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <UtensilsCrossed className="h-5 w-5 text-orange-600" />
+                      Horario Comida
+                    </CardTitle>
+                    <CardDescription>
+                      Registro de tickets de comida por trabajador
+                      {comidaTotal > 0 && ` — ${comidaSummary.trabajadores} trabajadores, ${comidaSummary.dias} días, ${comidaTotal} registros`}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="Buscar nombre o DNI..."
+                      value={comidaSearch}
+                      onChange={(e) => { setComidaSearch(e.target.value); setComidaPage(1) }}
+                      className="w-48 h-8 text-sm"
+                    />
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => fetchComidaData()} disabled={comidaLoading}>
+                      <RefreshCw className={`h-4 w-4 ${comidaLoading ? 'animate-spin' : ''}`} />
+                      Actualizar
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="w-24">DNI</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-28">Fecha</TableHead>
+                        <TableHead className="w-20 text-center">Horario</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {comidaLoading ? (
+                        Array.from({ length: 8 }).map((_, i) => (
+                          <TableRow key={i}>
+                            {Array.from({ length: 4 }).map((_, j) => (
+                              <TableCell key={j}>
+                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : comidaData.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center py-12 text-slate-500">
+                            No hay datos de comida cargados. Usá el botón "Cargar Comida" para subir el Excel.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        comidaData.map((c, idx) => (
+                          <TableRow key={`${c.dni}-${c.fecha}-${c.horario}-${idx}`} className="hover:bg-orange-50/50 transition-colors">
+                            <TableCell className="font-mono text-sm">{c.dni}</TableCell>
+                            <TableCell className="font-medium text-sm">{c.nombre}</TableCell>
+                            <TableCell className="text-sm">{formatDateDisplay(c.fecha)}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{c.horario}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                {comidaTotalPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t">
+                    <span className="text-sm text-slate-500">{comidaTotal} registros</span>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" disabled={comidaPage <= 1} onClick={() => setComidaPage(p => p - 1)}>Anterior</Button>
+                      <span className="text-sm">Pág. {comidaPage} de {comidaTotalPages}</span>
+                      <Button size="sm" variant="outline" disabled={comidaPage >= comidaTotalPages} onClick={() => setComidaPage(p => p + 1)}>Siguiente</Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
