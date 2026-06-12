@@ -1,0 +1,1502 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+     4→     4→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+     5→     5→import { Button } from '@/components/ui/button'
+     6→     6→import { Input } from '@/components/ui/input'
+     7→     7→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+     8→     8→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+     9→     9→import { Badge } from '@/components/ui/badge'
+    10→    10→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    11→    11→import {
+    12→    12→  Upload, Clock, Users, TrendingUp, Search, Trophy,
+    13→    13→  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee, Moon, UtensilsCrossed
+    14→    14→} from 'lucide-react'
+    15→    15→import { toast } from 'sonner'
+    16→    16→import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+    17→    17→import { Checkbox } from '@/components/ui/checkbox'
+    18→    18→
+    19→    19→interface RankingItem {
+    20→    20→  ranking: number
+    21→    21→  legajo: string
+    22→    22→  nombre: string
+    23→    23→  totalMinutos: number
+    24→    24→  descuentoMinutos: number
+    25→    25→  netoMinutos: number
+    26→    26→  cantidadSalidas: number
+    27→    27→  cantidadIngresos: number
+    28→    28→  promedioMinutos: number
+    29→    29→  turno: string
+    30→    30→}
+    31→    31→
+    32→    32→interface StatsData {
+    33→    33→  totalRegistros: number
+    34→    34→  totalMinutos: number
+    35→    35→  totalHoras: number
+    36→    36→  empleadosUnicos: number
+    37→    37→  promedioMinutos: number
+    38→    38→  totalEgresos: number
+    39→    39→  totalIngresos: number
+    40→    40→}
+    41→    41→
+    42→    42→interface MovementItem {
+    43→    43→  tipo: string
+    44→    44→  legajo: string
+    45→    45→  nombre: string
+    46→    46→  fecha: string
+    47→    47→  hora: string
+    48→    48→  turno: string
+    49→    49→  sector: string
+    50→    50→  empresa: string
+    51→    51→  duracionMinutos?: number
+    52→    52→}
+    53→    53→
+    54→    54→interface AnomaliaItem {
+    55→    55→  id: string
+    56→    56→  legajo: string
+    57→    57→  nombre: string
+    58→    58→  fecha: string
+    59→    59→  horaEntrada1: string
+    60→    60→  horaEntrada2: string
+    61→    61→  diferenciaMinutos: number
+    62→    62→  turno: string
+    63→    63→  sector: string
+    64→    64→  empresa: string
+    65→    65→}
+    66→    66→
+    67→    67→interface BreakfastExcessItem {
+    68→    68→  legajo: string
+    69→    69→  nombre: string
+    70→    70→  fecha: string
+    71→    71→  horaSalida: string
+    72→    72→  horaEntrada: string
+    73→    73→  duracionTotal: number
+    74→    74→  excesoMinutos: number
+    75→    75→  turno: string
+    76→    76→  sector: string
+    77→    77→  empresa: string
+    78→    78→}
+    79→    79→
+    80→    80→interface FilterData {
+    81→    81→  sectores: string[]
+    82→    82→  empresas: string[]
+    83→    83→  fechaMin: string
+    84→    84→  fechaMax: string
+    85→    85→}
+    86→    86→
+    87→    87→function formatDuration(minutes: number): string {
+    88→    88→  const h = Math.floor(minutes / 60)
+    89→    89→  const m = Math.round(minutes % 60)
+    90→    90→  if (h === 0) return `${m} min`
+    91→    91→  return `${h}h ${m}m`
+    92→    92→}
+    93→    93→
+    94→    94→function formatHHMMSS(totalMinutes: number): string {
+    95→    95→  const totalSec = Math.round(totalMinutes * 60)
+    96→    96→  const h = Math.floor(totalSec / 3600)
+    97→    97→  const m = Math.floor((totalSec % 3600) / 60)
+    98→    98→  const s = totalSec % 60
+    99→    99→  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+   100→   100→}
+   101→   101→
+   102→   102→function getRankBadgeColor(ranking: number): string {
+   103→   103→  if (ranking === 1) return 'bg-yellow-500 text-white'
+   104→   104→  if (ranking === 2) return 'bg-gray-400 text-white'
+   105→   105→  if (ranking === 3) return 'bg-amber-700 text-white'
+   106→   106→  return 'bg-muted text-muted-foreground'
+   107→   107→}
+   108→   108→
+   109→   109→function formatDateDisplay(dateStr: string): string {
+   110→   110→  if (!dateStr) return ''
+   111→   111→  const parts = dateStr.split('-')
+   112→   112→  if (parts.length === 3) {
+   113→   113→    const day = parts[2].padStart(2, '0')
+   114→   114→    const month = parts[1].padStart(2, '0')
+   115→   115→    const year = parts[0]
+   116→   116→    return `${day}/${month}/${year}`
+   117→   117→  }
+   118→   118→  return dateStr
+   119→   119→}
+   120→   120→
+   121→   121→function toISODate(displayStr: string): string {
+   122→   122→  if (!displayStr) return ''
+   123→   123→  const parts = displayStr.split('/')
+   124→   124→  if (parts.length === 3) {
+   125→   125→    return `${parts[2]}-${parts[1]}-${parts[0]}`
+   126→   126→  }
+   127→   127→  return displayStr
+   128→   128→}
+   129→   129→
+   130→   130→export default function Dashboard() {
+   131→   131→  const [ranking, setRanking] = useState<RankingItem[]>([])
+   132→   132→  const [stats, setStats] = useState<StatsData | null>(null)
+   133→   133→  const [filters, setFilters] = useState<FilterData>({ sectores: [], empresas: [], fechaMin: '', fechaMax: '' })
+   134→   134→  const [loading, setLoading] = useState(true)
+   135→   135→  const [uploading, setUploading] = useState(false)
+   136→   136→  const [uploadingComida, setUploadingComida] = useState(false)
+   137→   137→  const comidaFileRef = useRef<HTMLInputElement>(null)
+   138→   138→
+   139→   139→  // Filter state
+   140→   140→  const [sectorFilter, setSectorFilter] = useState<string[]>([])
+   141→   141→  const [empresaFilter, setEmpresaFilter] = useState<string[]>([])
+   142→   142→  const [turnoFilter, setTurnoFilter] = useState('')
+   143→   143→  const [search, setSearch] = useState('')
+   144→   144→  const [fechaDesde, setFechaDesde] = useState('')
+   145→   145→  const [fechaHasta, setFechaHasta] = useState('')
+   146→   146→  const [sortBy, setSortBy] = useState<'tiempo' | 'salidas'>('tiempo')
+   147→   147→  const [page, setPage] = useState(1)
+   148→   148→  const [totalPages, setTotalPages] = useState(1)
+   149→   149→  const [totalItems, setTotalItems] = useState(0)
+   150→   150→
+   151→   151→  const fetchRanking = useCallback(async () => {
+   152→   152→    setLoading(true)
+   153→   153→    try {
+   154→   154→      const params = new URLSearchParams()
+   155→   155→      sectorFilter.forEach(s => params.append('sector', s))
+   156→   156→      empresaFilter.forEach(e => params.append('empresa', e))
+   157→   157→      if (turnoFilter) params.set('turnoTipo', turnoFilter)
+   158→   158→      if (search) params.set('search', search)
+   159→   159→      if (sortBy) params.set('sortBy', sortBy)
+   160→   160→      params.set('page', String(page))
+   161→   161→      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+   162→   162→      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+   163→   163→
+   164→   164→      const res = await fetch(`/api/ranking?${params}`)
+   165→   165→      const data = await res.json()
+   166→   166→      setRanking(data.ranking)
+   167→   167→      setTotalPages(data.totalPages)
+   168→   168→      setTotalItems(data.total)
+   169→   169→      if (data.filters) setFilters(data.filters)
+   170→   170→    } catch (err) {
+   171→   171→      console.error('Error fetching ranking:', err)
+   172→   172→      toast.error('Error al cargar los datos del ranking')
+   173→   173→    } finally {
+   174→   174→      setLoading(false)
+   175→   175→    }
+   176→   176→  }, [sectorFilter, empresaFilter, turnoFilter, search, sortBy, page, fechaDesde, fechaHasta])
+   177→   177→
+   178→   178→  const fetchStats = useCallback(async () => {
+   179→   179→    try {
+   180→   180→      const params = new URLSearchParams()
+   181→   181→      sectorFilter.forEach(s => params.append('sector', s))
+   182→   182→      empresaFilter.forEach(e => params.append('empresa', e))
+   183→   183→      if (turnoFilter) params.set('turnoTipo', turnoFilter)
+   184→   184→      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+   185→   185→      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+   186→   186→
+   187→   187→      const res = await fetch(`/api/stats?${params}`)
+   188→   188→      const data = await res.json()
+   189→   189→      setStats(data)
+   190→   190→    } catch (err) {
+   191→   191→      console.error('Error fetching stats:', err)
+   192→   192→    }
+   193→   193→  }, [sectorFilter, empresaFilter, turnoFilter, fechaDesde, fechaHasta])
+   194→   194→
+   195→   195→  useEffect(() => {
+   196→   196→    fetchRanking()
+   197→   197→    fetchStats()
+   198→   198→  }, [fetchRanking, fetchStats])
+   199→   199→
+   200→   200→  useEffect(() => {
+   201→   201→    setPage(1)
+   202→   202→  }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
+   203→   203→
+   204→   204→  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   205→   205→    const file = e.target.files?.[0]
+   206→   206→    if (!file) return
+   207→   207→
+   208→   208→    setUploading(true)
+   209→   209→    try {
+   210→   210→      toast.info('Procesando archivo...')
+   211→   211→
+   212→   212→      const formData = new FormData()
+   213→   213→      formData.append('file', file)
+   214→   214→
+   215→   215→      const res = await fetch('/api/upload-file', {
+   216→   216→        method: 'POST',
+   217→   217→        body: formData,
+   218→   218→      })
+   219→   219→      const data = await res.json()
+   220→   220→
+   221→   221→      if (res.ok) {
+   222→   222→        const extraMsg = data.dobleEntradas > 0 ? ` | ${data.dobleEntradas} inconsistencia(s) detectada(s)` : ''
+   223→   223→        toast.success(`${data.sessionsInserted} sesiones cargadas (${data.rowsProcessed} filas, ${data.fichadasTotal} fichadas)${extraMsg}`)
+   224→   224→        fetchRanking()
+   225→   225→        fetchStats()
+   226→   226→        fetchAllMovements()
+   227→   227→        fetchAnomalies()
+   228→   228→        fetchBreakfastExcess()
+   229→   229→        fetchTnBreakExcess()
+   230→   230→      } else {
+   231→   231→        toast.error(`Error: ${data.error}`)
+   232→   232→      }
+   233→   233→    } catch (err) {
+   234→   234→      toast.error('Error al procesar: ' + (err instanceof Error ? err.message : String(err)))
+   235→   235→      console.error('Upload error:', err)
+   236→   236→    } finally {
+   237→   237→      setUploading(false)
+   238→   238→      if (fileInputRef.current) fileInputRef.current.value = ''
+   239→   239→    }
+   240→   240→  }
+   241→   241→
+   242→   242→  const clearFilters = () => {
+   243→   243→    setSectorFilter([])
+   244→   244→    setEmpresaFilter([])
+   245→   245→    setTurnoFilter('')
+   246→   246→    setSearch('')
+   247→   247→    setFechaDesde('')
+   248→   248→    setFechaHasta('')
+   249→   249→  }
+   250→   250→
+   251→   251→  const handleComidaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   252→   252→    const file = e.target.files?.[0]
+   253→   253→    if (!file) return
+   254→   254→
+   255→   255→    setUploadingComida(true)
+   256→   256→    try {
+   257→   257→      toast.info('Procesando archivo de comida...')
+   258→   258→      const formData = new FormData()
+   259→   259→      formData.append('file', file)
+   260→   260→
+   261→   261→      const res = await fetch('/api/comida/upload', {
+   262→   262→        method: 'POST',
+   263→   263→        body: formData,
+   264→   264→      })
+   265→   265→      const data = await res.json()
+   266→   266→
+   267→   267→      if (res.ok) {
+   268→   268→        toast.success(data.message || `${data.inserted} registros de comida cargados`)
+   269→   269→        fetchComidaData()
+   270→   270→      } else {
+   271→   271→        toast.error(`Error: ${data.error}`)
+   272→   272→      }
+   273→   273→    } catch (err) {
+   274→   274→      toast.error('Error al procesar comida: ' + (err instanceof Error ? err.message : String(err)))
+   275→   275→    } finally {
+   276→   276→      setUploadingComida(false)
+   277→   277→      if (comidaFileRef.current) comidaFileRef.current.value = ''
+   278→   278→    }
+   279→   279→  }
+   280→   280→
+   281→   281→  // Movements state
+   282→   282→  const [movements, setMovements] = useState<MovementItem[]>([])
+   283→   283→  const [movLoading, setMovLoading] = useState(false)
+   284→   284→  const [movAutoNames, setMovAutoNames] = useState<string[]>([])
+   285→   285→  const [movUniqueDates, setMovUniqueDates] = useState<string[]>([])
+   286→   286→  const [movNombre, setMovNombre] = useState('')
+   287→   287→  const [movFecha, setMovFecha] = useState('')
+   288→   288→  const fileInputRef = useRef<HTMLInputElement>(null)
+   289→   289→
+   290→   290→  const fetchAllMovements = useCallback(async () => {
+   291→   291→    setMovLoading(true)
+   292→   292→    try {
+   293→   293→      const params = new URLSearchParams()
+   294→   294→      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+   295→   295→      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+   296→   296→      const res = await fetch(`/api/movements?${params}`)
+   297→   297→      const data = await res.json()
+   298→   298→      setMovements(data.movements)
+   299→   299→      setMovAutoNames(data.uniqueNames || [])
+   300→   300→      setMovUniqueDates(data.uniqueDates || [])
+   301→   301→
+   302→   302→      // Also fetch comida for the same date range to merge into movements
+   303→   303→      try {
+   304→   304→        const cParams = new URLSearchParams()
+   305→   305→        if (fechaDesde) cParams.set('fechaDesde', toISODate(fechaDesde))
+   306→   306→        if (fechaHasta) cParams.set('fechaHasta', toISODate(fechaHasta))
+   307→   307→        cParams.set('pageSize', '9999')
+   308→   308→        const cRes = await fetch(`/api/comida?${cParams}`)
+   309→   309→        const cData = await cRes.json()
+   310→   310→        // Build map: key = nombre_fecha -> array of comida records
+   311→   311→        const map = new Map<string, any[]>()
+   312→   312→        for (const c of (cData.data || [])) {
+   313→   313→          const key = `${c.nombre.toUpperCase().trim()}_${c.fecha}`
+   314→   314→          if (!map.has(key)) map.set(key, [])
+   315→   315→          map.get(key)!.push(c)
+   316→   316→        }
+   317→   317→        setComidaMovMerge(map)
+   318→   318→      } catch (e) {
+   319→   319→        console.error('Error fetching comida for movements:', e)
+   320→   320→      }
+   321→   321→    } catch (err) {
+   322→   322→      console.error('Error fetching movements:', err)
+   323→   323→    } finally {
+   324→   324→      setMovLoading(false)
+   325→   325→    }
+   326→   326→  }, [fechaDesde, fechaHasta])
+   327→   327→
+   328→   328→  const fetchFilteredMovements = useCallback(async () => {
+   329→   329→    setMovLoading(true)
+   330→   330→    try {
+   331→   331→      const params = new URLSearchParams()
+   332→   332→      if (movNombre) params.set('nombre', movNombre)
+   333→   333→      if (movFecha) params.set('fecha', movFecha)
+   334→   334→      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+   335→   335→      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+   336→   336→      const res = await fetch(`/api/movements?${params}`)
+   337→   337→      const data = await res.json()
+   338→   338→      setMovements(data.movements)
+   339→   339→      setMovAutoNames(data.uniqueNames || [])
+   340→   340→      setMovUniqueDates(data.uniqueDates || [])
+   341→   341→    } catch (err) {
+   342→   342→      toast.error('Error al buscar movimientos')
+   343→   343→    } finally {
+   344→   344→      setMovLoading(false)
+   345→   345→    }
+   346→   346→  }, [movNombre, movFecha, fechaDesde, fechaHasta])
+   347→   347→
+   348→   348→  useEffect(() => {
+   349→   349→    if (filters.fechaMin) {
+   350→   350→      fetchAllMovements()
+   351→   351→    }
+   352→   352→  }, [filters.fechaMin, fetchAllMovements])
+   353→   353→
+   354→   354→  // Anomalies state
+   355→   355→  const [anomalies, setAnomalies] = useState<AnomaliaItem[]>([])
+   356→   356→  const [anomLoading, setAnomLoading] = useState(false)
+   357→   357→  const [anomUniqueDates, setAnomUniqueDates] = useState<string[]>([])
+   358→   358→  const [anomFecha, setAnomFecha] = useState('')
+   359→   359→  const [anomSearch, setAnomSearch] = useState('')
+   360→   360→
+   361→   361→  // Breakfast excess state
+   362→   362→  const [breakfastExcess, setBreakfastExcess] = useState<BreakfastExcessItem[]>([])
+   363→   363→  const [breakfastLoading, setBreakfastLoading] = useState(false)
+   364→   364→
+   365→   365→  // TN break excess state
+   366→   366→  const [tnBreakExcess, setTnBreakExcess] = useState<BreakfastExcessItem[]>([])
+   367→   367→  const [tnBreakLoading, setTnBreakLoading] = useState(false)
+   368→   368→
+   369→   369→  // Comida state
+   370→   370→  const [comidaData, setComidaData] = useState<any[]>([])
+   371→   371→  const [comidaMovMerge, setComidaMovMerge] = useState<Map<string, any[]>>(new Map())
+   372→   372→  const [comidaTotal, setComidaTotal] = useState(0)
+   373→   373→  const [comidaPage, setComidaPage] = useState(1)
+   374→   374→  const [comidaTotalPages, setComidaTotalPages] = useState(0)
+   375→   375→  const [comidaLoading, setComidaLoading] = useState(false)
+   376→   376→  const [comidaSearch, setComidaSearch] = useState('')
+   377→   377→  const [comidaSummary, setComidaSummary] = useState({ trabajadores: 0, dias: 0 })
+   378→   378→
+   379→   379→  const fetchAnomalies = useCallback(async () => {
+   380→   380→    setAnomLoading(true)
+   381→   381→    try {
+   382→   382→      const params = new URLSearchParams()
+   383→   383→      if (anomSearch) params.set('search', anomSearch)
+   384→   384→      if (anomFecha) params.set('fecha', anomFecha)
+   385→   385→      if (turnoFilter) params.set('turnoTipo', turnoFilter)
+   386→   386→      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+   387→   387→      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+   388→   388→      const res = await fetch(`/api/anomalies?${params}`)
+   389→   389→      const data = await res.json()
+   390→   390→      setAnomalies(data.anomalies || [])
+   391→   391→      setAnomUniqueDates(data.uniqueDates || [])
+   392→   392→    } catch (err) {
+   393→   393→      console.error('Error fetching anomalies:', err)
+   394→   394→    } finally {
+   395→   395→      setAnomLoading(false)
+   396→   396→    }
+   397→   397→  }, [anomSearch, anomFecha, turnoFilter, fechaDesde, fechaHasta])
+   398→   398→
+   399→   399→  const fetchBreakfastExcess = useCallback(async () => {
+   400→   400→    setBreakfastLoading(true)
+   401→   401→    try {
+   402→   402→      const params = new URLSearchParams()
+   403→   403→      sectorFilter.forEach(s => params.append('sector', s))
+   404→   404→      empresaFilter.forEach(e => params.append('empresa', e))
+   405→   405→      if (search) params.set('search', search)
+   406→   406→      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+   407→   407→      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+   408→   408→      const res = await fetch(`/api/breakfast-excess?${params}`)
+   409→   409→      const data = await res.json()
+   410→   410→      setBreakfastExcess(data.excesos || [])
+   411→   411→    } catch (err) {
+   412→   412→      console.error('Error fetching breakfast excess:', err)
+   413→   413→    } finally {
+   414→   414→      setBreakfastLoading(false)
+   415→   415→    }
+   416→   416→  }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
+   417→   417→
+   418→   418→  const fetchTnBreakExcess = useCallback(async () => {
+   419→   419→    setTnBreakLoading(true)
+   420→   420→    try {
+   421→   421→      const params = new URLSearchParams()
+   422→   422→      sectorFilter.forEach(s => params.append('sector', s))
+   423→   423→      empresaFilter.forEach(e => params.append('empresa', e))
+   424→   424→      if (search) params.set('search', search)
+   425→   425→      if (fechaDesde) params.set('fechaDesde', toISODate(fechaDesde))
+   426→   426→      if (fechaHasta) params.set('fechaHasta', toISODate(fechaHasta))
+   427→   427→      const res = await fetch(`/api/tn-break-excess?${params}`)
+   428→   428→      const data = await res.json()
+   429→   429→      setTnBreakExcess(data.excesos || [])
+   430→   430→    } catch (err) {
+   431→   431→      console.error('Error fetching TN break excess:', err)
+   432→   432→    } finally {
+   433→   433→      setTnBreakLoading(false)
+   434→   434→    }
+   435→   435→  }, [sectorFilter, empresaFilter, search, fechaDesde, fechaHasta])
+   436→   436→
+   437→   437→  const fetchComidaData = useCallback(async () => {
+   438→   438→    setComidaLoading(true)
+   439→   439→    try {
+   440→   440→      const params = new URLSearchParams()
+   441→   441→      if (comidaSearch) params.set('search', comidaSearch)
+   442→   442→      params.set('page', String(comidaPage))
+   443→   443→      const res = await fetch(`/api/comida?${params}`)
+   444→   444→      const data = await res.json()
+   445→   445→      setComidaData(data.data || [])
+   446→   446→      setComidaTotal(data.total || 0)
+   447→   447→      setComidaTotalPages(data.totalPages || 0)
+   448→   448→      setComidaSummary(data.summary || { trabajadores: 0, dias: 0 })
+   449→   449→    } catch (err) {
+   450→   450→      console.error('Error fetching comida:', err)
+   451→   451→    } finally {
+   452→   452→      setComidaLoading(false)
+   453→   453→    }
+   454→   454→  }, [comidaSearch, comidaPage])
+   455→   455→
+   456→   456→  // Auto-fetch comida when tab is opened or search/page changes
+   457→   457→  useEffect(() => {
+   458→   458→    fetchComidaData()
+   459→   459→  }, [fetchComidaData])
+   460→   460→
+   461→   461→  useEffect(() => {
+   462→   462→    if (filters.fechaMin) {
+   463→   463→      fetchAnomalies()
+   464→   464→      fetchBreakfastExcess()
+   465→   465→      fetchTnBreakExcess()
+   466→   466→    }
+   467→   467→  }, [filters.fechaMin, fetchAnomalies, fetchBreakfastExcess, fetchTnBreakExcess])
+   468→   468→
+   469→   469→  const downloadMovementsCSV = () => {
+   470→   470→    if (!movements || movements.length === 0) return
+   471→   471→    try {
+   472→   472→      const BOM = '\uFEFF'
+   473→   473→      const headers = ['Tipo', 'Legajo', 'Nombre', 'Fecha', 'Hora', 'Duracion (min)', 'Turno', 'Sector', 'Empresa']
+   474→   474→      const rows = movements.map(m => [
+   475→   475→        m.tipo, m.legajo, m.nombre, m.fecha, m.hora,
+   476→   476→        m.duracionMinutos ? String(m.duracionMinutos) : '-',
+   477→   477→        m.turno, m.sector, m.empresa,
+   478→   478→      ])
+   479→   479→      const csvContent = BOM + [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+   480→   480→      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+   481→   481→      const url = URL.createObjectURL(blob)
+   482→   482→      const link = window.document.createElement('a')
+   483→   483→      link.href = url
+   484→   484→      link.download = `movimientos_todos.csv`
+   485→   485→      window.document.body.appendChild(link)
+   486→   486→      link.click()
+   487→   487→      window.document.body.removeChild(link)
+   488→   488→      URL.revokeObjectURL(url)
+   489→   489→      toast.success('Archivo CSV descargado')
+   490→   490→    } catch (err) {
+   491→   491→      console.error('Download error:', err)
+   492→   492→      toast.error('Error al descargar')
+   493→   493→    }
+   494→   494→  }
+   495→   495→
+   496→   496→  const downloadAnomaliesCSV = () => {
+   497→   497→    if (!anomalies || anomalies.length === 0) return
+   498→   498→    try {
+   499→   499→      const BOM = '\uFEFF'
+   500→   500→      const headers = ['Legajo', 'Nombre', 'Fecha', '1ra Entrada', '2da Entrada', 'Diferencia (min)', 'Turno', 'Sector', 'Empresa']
+   501→   501→      const rows = anomalies.map(a => [
+   502→   502→        a.legajo, a.nombre, a.fecha, a.horaEntrada1, a.horaEntrada2,
+   503→   503→        a.diferenciaMinutos, a.turno, a.sector, a.empresa,
+   504→   504→      ])
+   505→   505→      const csvContent = BOM + [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+   506→   506→      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+   507→   507→      const url = URL.createObjectURL(blob)
+   508→   508→      const link = window.document.createElement('a')
+   509→   509→      link.href = url
+   510→   510→      link.download = `inconsistencias.csv`
+   511→   511→      window.document.body.appendChild(link)
+   512→   512→      link.click()
+   513→   513→      window.document.body.removeChild(link)
+   514→   514→      URL.revokeObjectURL(url)
+   515→   515→      toast.success('Archivo CSV descargado')
+   516→   516→    } catch (err) {
+   517→   517→      console.error('Download error:', err)
+   518→   518→      toast.error('Error al descargar')
+   519→   519→    }
+   520→   520→  }
+   521→   521→
+   522→   522→  const hasFilters = sectorFilter.length > 0 || empresaFilter.length > 0 || turnoFilter || search || fechaDesde || fechaHasta
+   523→   523→
+   524→   524→  const fechasCargadas = movUniqueDates.length > 0 ? movUniqueDates.sort().map(formatDateDisplay) : []
+   525→   525→
+   526→   526→  const filteredMovements = useMemo(() => {
+   527→   527→    // Merge comida records into movements
+   528→   528→    const merged: MovementItem[] = []
+   529→   529→    const usedComida = new Set<string>()
+   530→   530→
+   531→   531→    for (const m of movements) {
+   532→   532→      if (movNombre && !m.nombre.toLowerCase().includes(movNombre.toLowerCase()) && !m.legajo.includes(movNombre)) continue
+   533→   533→      if (movFecha && m.fecha !== movFecha) continue
+   534→   534→      merged.push(m)
+   535→   535→    }
+   536→   536→
+   537→   537→    // Add comida rows matched by nombre and fecha
+   538→   538→    for (const m of merged) {
+   539→   539→      const key = `${m.nombre.toUpperCase().trim()}_${m.fecha}`
+   540→   540→      const comidas = comidaMovMerge.get(key)
+   541→   541→      if (comidas) {
+   542→   542→        for (const c of comidas) {
+   543→   543→          const cKey = `${c.dni}_${c.fecha}_${c.horario}`
+   544→   544→          if (!usedComida.has(cKey)) {
+   545→   545→            usedComida.add(cKey)
+   546→   546→            merged.push({
+   547→   547→              tipo: 'Comida TK',
+   548→   548→              legajo: '',
+   549→   549→              nombre: m.nombre,
+   550→   550→              fecha: c.fecha,
+   551→   551→              hora: c.horario,
+   552→   552→              turno: '',
+   553→   553→              sector: '',
+   554→   554→              empresa: '',
+   555→   555→              duracionMinutos: null,
+   556→   556→            })
+   557→   557→          }
+   558→   558→        }
+   559→   559→      }
+   560→   560→    }
+   561→   561→
+   562→   562→    // Sort by fecha DESC, then hora ASC (comida rows interleave correctly)
+   563→   563→    merged.sort((a, b) => {
+   564→   564→      if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha)
+   565→   565→      if (a.legajo && b.legajo && a.legajo !== b.legajo) return a.legajo.localeCompare(b.legajo)
+   566→   566→      return a.hora.localeCompare(b.hora)
+   567→   567→    })
+   568→   568→
+   569→   569→    return merged
+   570→   570→  }, [movements, movNombre, movFecha, comidaMovMerge])
+   571→   571→
+   572→   572→  const totalFichadas = movements.length
+   573→   573→  const egresosCount = movements.filter(m => m.tipo === 'Salida Depo').length
+   574→   574→  const ingresosCount = movements.filter(m => m.tipo === 'Entrada Depo').length
+   575→   575→
+   576→   576→  return (
+   577→   577→    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+   578→   578→      {/* Header */}
+   579→   579→      <header className="bg-white border-b shadow-sm sticky top-0 z-50">
+   580→   580→        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between flex-wrap gap-4">
+   581→   581→          <div className="flex items-center gap-3">
+   582→   582→            <img src="/logo-grupo-gestion.jpeg" alt="Grupo Gestión" className="h-10 w-auto object-contain" />
+   583→   583→            <div>
+   584→   584→              <h1 className="text-xl font-bold text-slate-900">Tiempos Fuera de Depósito</h1>
+   585→   585→              <p className="text-sm text-slate-500">Ranking de tiempos muertos por empleado</p>
+   586→   586→            </div>
+   587→   587→          </div>
+   588→   588→          <div className="flex items-center gap-3">
+   589→   589→            <input
+   590→   590→              ref={fileInputRef}
+   591→   591→              type="file"
+   592→   592→              accept=".xlsx,.xls"
+   593→   593→              onChange={handleUpload}
+   594→   594→              className="hidden"
+   595→   595→            />
+   596→   596→            <Button variant="outline" size="sm" className="gap-2" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+   597→   597→              {uploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+   598→   598→              {uploading ? 'Procesando...' : 'Cargar Fichadas'}
+   599→   599→            </Button>
+   600→   600→            <input
+   601→   601→              ref={comidaFileRef}
+   602→   602→              type="file"
+   603→   603→              accept=".xlsx,.xls"
+   604→   604→              onChange={handleComidaUpload}
+   605→   605→              className="hidden"
+   606→   606→            />
+   607→   607→            <Button variant="outline" size="sm" className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50" disabled={uploadingComida} onClick={() => comidaFileRef.current?.click()}>
+   608→   608→              {uploadingComida ? <RefreshCw className="h-4 w-4 animate-spin" /> : <UtensilsCrossed className="h-4 w-4" />}
+   609→   609→              {uploadingComida ? 'Procesando...' : 'Cargar Comida'}
+   610→   610→            </Button>
+   611→   611→          </div>
+   612→   612→        </div>
+   613→   613→      </header>
+   614→   614→
+   615→   615→      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+   616→   616→        {/* Stats Cards - 5 cards: Egresos, Ingresos, Tiempo Total, Empleados, Promedio */}
+   617→   617→        {stats && (
+   618→   618→          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+   619→   619→            <Card className="border-l-4 border-l-red-500">
+   620→   620→              <CardContent className="p-4">
+   621→   621→                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+   622→   622→                  <LogOut className="h-4 w-4 text-red-500" />
+   623→   623→                  Egresos
+   624→   624→                </div>
+   625→   625→                <p className="text-2xl font-bold text-slate-900">{(stats.totalEgresos || 0).toLocaleString()}</p>
+   626→   626→                <p className="text-xs text-slate-400">salidas del depósito</p>
+   627→   627→              </CardContent>
+   628→   628→            </Card>
+   629→   629→            <Card className="border-l-4 border-l-green-500">
+   630→   630→              <CardContent className="p-4">
+   631→   631→                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+   632→   632→                  <LogIn className="h-4 w-4 text-green-500" />
+   633→   633→                  Ingresos
+   634→   634→                </div>
+   635→   635→                <p className="text-2xl font-bold text-slate-900">{(stats.totalIngresos || 0).toLocaleString()}</p>
+   636→   636→                <p className="text-xs text-slate-400">ingresos al depósito</p>
+   637→   637→              </CardContent>
+   638→   638→            </Card>
+   639→   639→            <Card className="border-l-4 border-l-blue-500">
+   640→   640→              <CardContent className="p-4">
+   641→   641→                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+   642→   642→                  <Clock className="h-4 w-4 text-blue-500" />
+   643→   643→                  Tiempo Total
+   644→   644→                </div>
+   645→   645→                <p className="text-2xl font-bold text-slate-900">{formatDuration(stats.totalMinutos)}</p>
+   646→   646→                <p className="text-xs text-slate-400">{stats.totalHoras.toLocaleString()} horas</p>
+   647→   647→              </CardContent>
+   648→   648→            </Card>
+   649→   649→            <Card className="border-l-4 border-l-amber-500">
+   650→   650→              <CardContent className="p-4">
+   651→   651→                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+   652→   652→                  <Users className="h-4 w-4" />
+   653→   653→                  Empleados
+   654→   654→                </div>
+   655→   655→                <p className="text-2xl font-bold text-slate-900">{stats.empleadosUnicos}</p>
+   656→   656→                <p className="text-xs text-slate-400">con registros</p>
+   657→   657→              </CardContent>
+   658→   658→            </Card>
+   659→   659→            <Card className="border-l-4 border-l-purple-500">
+   660→   660→              <CardContent className="p-4">
+   661→   661→                <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
+   662→   662→                  <TrendingUp className="h-4 w-4" />
+   663→   663→                  Promedio
+   664→   664→                </div>
+   665→   665→                <p className="text-2xl font-bold text-slate-900">{formatDuration(stats.promedioMinutos)}</p>
+   666→   666→                <p className="text-xs text-slate-400">por salida</p>
+   667→   667→              </CardContent>
+   668→   668→            </Card>
+   669→   669→          </div>
+   670→   670→        )}
+   671→   671→
+   672→   672→        {/* Fechas cargadas */}
+   673→   673→        {fechasCargadas.length > 0 && (
+   674→   674→          <Card className="border-l-4 border-l-blue-500">
+   675→   675→            <CardContent className="p-4">
+   676→   676→              <div className="flex items-center gap-3">
+   677→   677→                <CalendarDays className="h-5 w-5 text-blue-600" />
+   678→   678→                <div>
+   679→   679→                  <p className="text-sm font-medium text-slate-700">
+   680→   680→                    {fechasCargadas.length === 1
+   681→   681→                      ? `Fecha cargada: ${fechasCargadas[0]}`
+   682→   682→                      : `Fechas cargadas (${fechasCargadas.length}):`
+   683→   683→                    }
+   684→   684→                  </p>
+   685→   685→                  {fechasCargadas.length > 1 && (
+   686→   686→                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+   687→   687→                      {fechasCargadas.map(f => (
+   688→   688→                        <Badge key={f} variant="secondary" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+   689→   689→                          {f}
+   690→   690→                        </Badge>
+   691→   691→                      ))}
+   692→   692→                    </div>
+   693→   693→                  )}
+   694→   694→                </div>
+   695→   695→              </div>
+   696→   696→            </CardContent>
+   697→   697→          </Card>
+   698→   698→        )}
+   699→   699→
+   700→   700→        {/* Filters */}
+   701→   701→        <Card>
+   702→   702→          <CardContent className="p-4">
+   703→   703→            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 items-end">
+   704→   704→              <div>
+   705→   705→                <label className="text-xs font-medium text-slate-500 mb-1 block">Desde</label>
+   706→   706→                <Input
+   707→   707→                  type="date"
+   708→   708→                  value={fechaDesde}
+   709→   709→                  onChange={(e) => setFechaDesde(e.target.value)}
+   710→   710→                  className="h-9"
+   711→   711→                />
+   712→   712→              </div>
+   713→   713→              <div>
+   714→   714→                <label className="text-xs font-medium text-slate-500 mb-1 block">Hasta</label>
+   715→   715→                <Input
+   716→   716→                  type="date"
+   717→   717→                  value={fechaHasta}
+   718→   718→                  onChange={(e) => setFechaHasta(e.target.value)}
+   719→   719→                  className="h-9"
+   720→   720→                />
+   721→   721→              </div>
+   722→   722→              <div>
+   723→   723→                <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar</label>
+   724→   724→                <div className="relative">
+   725→   725→                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+   726→   726→                  <Input
+   727→   727→                    placeholder="Legajo o nombre..."
+   728→   728→                    value={search}
+   729→   729→                    onChange={(e) => setSearch(e.target.value)}
+   730→   730→                    className="pl-9 h-9"
+   731→   731→                  />
+   732→   732→                </div>
+   733→   733→              </div>
+   734→   734→              <div>
+   735→   735→                <label className="text-xs font-medium text-slate-500 mb-1 block">Sector</label>
+   736→   736→                <Popover>
+   737→   737→                  <PopoverTrigger asChild>
+   738→   738→                    <Button variant="outline" className="h-9 w-full justify-between text-left font-normal">
+   739→   739→                      <span className="truncate">
+   740→   740→                        {sectorFilter.length === 0 ? 'Todos' : `${sectorFilter.length} seleccionado(s)`}
+   741→   741→                      </span>
+   742→   742→                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+   743→   743→                    </Button>
+   744→   744→                  </PopoverTrigger>
+   745→   745→                  <PopoverContent className="w-64 p-0" align="start">
+   746→   746→                    <div className="p-2 border-b flex items-center justify-between">
+   747→   747→                      <span className="text-xs font-medium text-slate-500">Sectores ({filters.sectores.length})</span>
+   748→   748→                      {sectorFilter.length > 0 && (
+   749→   749→                        <button onClick={() => setSectorFilter([])} className="text-xs text-slate-400 hover:text-slate-600">Limpiar</button>
+   750→   750→                      )}
+   751→   751→                    </div>
+   752→   752→                    <div className="max-h-48 overflow-y-auto p-1">
+   753→   753→                      {filters.sectores.map((s) => (
+   754→   754→                        <label key={s} className="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-slate-50 cursor-pointer text-sm">
+   755→   755→                          <Checkbox
+   756→   756→                            checked={sectorFilter.includes(s)}
+   757→   757→                            onCheckedChange={(checked) => {
+   758→   758→                              if (checked) setSectorFilter([...sectorFilter, s])
+   759→   759→                              else setSectorFilter(sectorFilter.filter(x => x !== s))
+   760→   760→                            }}
+   761→   761→                          />
+   762→   762→                          <span>{s}</span>
+   763→   763→                        </label>
+   764→   764→                      ))}
+   765→   765→                    </div>
+   766→   766→                  </PopoverContent>
+   767→   767→                </Popover>
+   768→   768→              </div>
+   769→   769→              <div>
+   770→   770→                <label className="text-xs font-medium text-slate-500 mb-1 block">Empresa</label>
+   771→   771→                <Popover>
+   772→   772→                  <PopoverTrigger asChild>
+   773→   773→                    <Button variant="outline" className="h-9 w-full justify-between text-left font-normal">
+   774→   774→                      <span className="truncate">
+   775→   775→                        {empresaFilter.length === 0 ? 'Todas' : `${empresaFilter.length} seleccionada(s)`}
+   776→   776→                      </span>
+   777→   777→                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+   778→   778→                    </Button>
+   779→   779→                  </PopoverTrigger>
+   780→   780→                  <PopoverContent className="w-64 p-0" align="start">
+   781→   781→                    <div className="p-2 border-b flex items-center justify-between">
+   782→   782→                      <span className="text-xs font-medium text-slate-500">Empresas ({filters.empresas.length})</span>
+   783→   783→                      {empresaFilter.length > 0 && (
+   784→   784→                        <button onClick={() => setEmpresaFilter([])} className="text-xs text-slate-400 hover:text-slate-600">Limpiar</button>
+   785→   785→                      )}
+   786→   786→                    </div>
+   787→   787→                    <div className="max-h-48 overflow-y-auto p-1">
+   788→   788→                      {filters.empresas.map((e) => (
+   789→   789→                        <label key={e} className="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-slate-50 cursor-pointer text-sm">
+   790→   790→                          <Checkbox
+   791→   791→                            checked={empresaFilter.includes(e)}
+   792→   792→                            onCheckedChange={(checked) => {
+   793→   793→                              if (checked) setEmpresaFilter([...empresaFilter, e])
+   794→   794→                              else setEmpresaFilter(empresaFilter.filter(x => x !== e))
+   795→   795→                            }}
+   796→   796→                          />
+   797→   797→                          <span>{e}</span>
+   798→   798→                        </label>
+   799→   799→                      ))}
+   800→   800→                    </div>
+   801→   801→                  </PopoverContent>
+   802→   802→                </Popover>
+   803→   803→              </div>
+   804→   804→              <div>
+   805→   805→                <label className="text-xs font-medium text-slate-500 mb-1 block">Turno</label>
+   806→   806→                <Select value={turnoFilter} onValueChange={(v) => setTurnoFilter(v === '__all__' ? '' : v)}>
+   807→   807→                  <SelectTrigger className="h-9">
+   808→   808→                    <SelectValue placeholder="Todos" />
+   809→   809→                  </SelectTrigger>
+   810→   810→                  <SelectContent>
+   811→   811→                    <SelectItem value="__all__">Todos</SelectItem>
+   812→   812→                    <SelectItem value="TM">TM - Mañana</SelectItem>
+   813→   813→                    <SelectItem value="TT">TT - Tarde</SelectItem>
+   814→   814→                    <SelectItem value="TN">TN - Noche</SelectItem>
+   815→   815→                    <SelectItem value="Descanso">Descanso</SelectItem>
+   816→   816→                  </SelectContent>
+   817→   817→                </Select>
+   818→   818→              </div>
+   819→   819→              <div className="flex items-end">
+   820→   820→                {hasFilters && (
+   821→   821→                  <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 text-slate-500">
+   822→   822→                    Limpiar
+   823→   823→                  </Button>
+   824→   824→                )}
+   825→   825→              </div>
+   826→   826→            </div>
+   827→   827→          </CardContent>
+   828→   828→        </Card>
+   829→   829→
+   830→   830→        {/* Main Content: Ranking + Movimientos + Inconsistencias */}
+   831→   831→        <Tabs defaultValue="ranking" className="space-y-4">
+   832→   832→          <TabsList className="bg-white">
+   833→   833→            <TabsTrigger value="ranking" className="gap-2">
+   834→   834→              <Trophy className="h-4 w-4" />
+   835→   835→              Ranking
+   836→   836→            </TabsTrigger>
+   837→   837→            <TabsTrigger value="movimientos" className="gap-2">
+   838→   838→              <List className="h-4 w-4" />
+   839→   839→              Movimientos
+   840→   840→            </TabsTrigger>
+   841→   841→            <TabsTrigger value="inconsistencias" className="gap-2">
+   842→   842→              <AlertTriangle className="h-4 w-4" />
+   843→   843→              Inconsistencias
+   844→   844→              {anomalies.length > 0 && (
+   845→   845→                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{anomalies.length}</Badge>
+   846→   846→              )}
+   847→   847→            </TabsTrigger>
+   848→   848→            <TabsTrigger value="desayuno" className="gap-2">
+   849→   849→              <Coffee className="h-4 w-4" />
+   850→   850→              Exceso Desayuno
+   851→   851→              {breakfastExcess.length > 0 && (
+   852→   852→                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{breakfastExcess.length}</Badge>
+   853→   853→              )}
+   854→   854→            </TabsTrigger>
+   855→   855→            <TabsTrigger value="break-tn" className="gap-2">
+   856→   856→              <Moon className="h-4 w-4" />
+   857→   857→              Break TN
+   858→   858→              {tnBreakExcess.length > 0 && (
+   859→   859→                <Badge variant="destructive" className="ml-1 text-[10px] px-1.5 py-0">{tnBreakExcess.length}</Badge>
+   860→   860→              )}
+   861→   861→            </TabsTrigger>
+   862→   862→            <TabsTrigger value="comida" className="gap-2">
+   863→   863→              <UtensilsCrossed className="h-4 w-4" />
+   864→   864→              Horario Comida
+   865→   865→            </TabsTrigger>
+   866→   866→          </TabsList>
+   867→   867→
+   868→   868→          {/* Ranking Table */}
+   869→   869→          <TabsContent value="ranking">
+   870→   870→            <Card>
+   871→   871→              <CardHeader className="pb-3">
+   872→   872→                <div className="flex items-center justify-between flex-wrap gap-3">
+   873→   873→                  <div>
+   874→   874→                    <CardTitle className="text-lg">Ranking de Tiempos Fuera de Depósito</CardTitle>
+   875→   875→                    <CardDescription>
+   876→   876→                      {totalItems} empleados encontrados
+   877→   877→                      {hasFilters && ' (con filtros aplicados)'}
+   878→   878→                    </CardDescription>
+   879→   879→                  </div>
+   880→   880→                  <div className="flex items-center gap-2">
+   881→   881→                    <div className="flex items-center bg-slate-100 rounded-lg p-1">
+   882→   882→                      <button
+   883→   883→                        className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${sortBy === 'tiempo' ? 'bg-white shadow-sm text-red-600' : 'text-slate-500 hover:text-slate-700'}`}
+   884→   884→                        onClick={() => { setSortBy('tiempo'); setPage(1) }}
+   885→   885→                      >
+   886→   886→                        <Trophy className="h-3.5 w-3.5 inline mr-1" />
+   887→   887→                        Por Tiempo
+   888→   888→                      </button>
+   889→   889→                      <button
+   890→   890→                        className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${sortBy === 'salidas' ? 'bg-white shadow-sm text-red-600' : 'text-slate-500 hover:text-slate-700'}`}
+   891→   891→                        onClick={() => { setSortBy('salidas'); setPage(1) }}
+   892→   892→                      >
+   893→   893→                        <BarChart3 className="h-3.5 w-3.5 inline mr-1" />
+   894→   894→                        Por Salidas
+   895→   895→                      </button>
+   896→   896→                    </div>
+   897→   897→                    <Badge variant="outline" className="text-xs">
+   898→   898→                      Pág. {page} de {totalPages}
+   899→   899→                    </Badge>
+   900→   900→                  </div>
+   901→   901→                </div>
+   902→   902→              </CardHeader>
+   903→   903→              <CardContent className="p-0">
+   904→   904→                <div className="overflow-x-auto">
+   905→   905→                  <Table>
+   906→   906→                    <TableHeader>
+   907→   907→                      <TableRow className="bg-slate-50">
+   908→   908→                        <TableHead className="w-16 text-center">#</TableHead>
+   909→   909→                        <TableHead className="w-24">Legajo</TableHead>
+   910→   910→                        <TableHead>Nombre</TableHead>
+   911→   911→                        <TableHead className="text-right">Tiempo Total</TableHead>
+   912→   912→                        <TableHead className="text-right hidden md:table-cell">Descuento</TableHead>
+   913→   913→                        <TableHead className="text-right">Tiempo Neto</TableHead>
+   914→   914→                        <TableHead className="text-right hidden sm:table-cell">Salidas</TableHead>
+   915→   915→                        <TableHead className="text-right hidden lg:table-cell">Promedio</TableHead>
+   916→   916→                        <TableHead className="hidden xl:table-cell">Turno</TableHead>
+   917→   917→                      </TableRow>
+   918→   918→                    </TableHeader>
+   919→   919→                    <TableBody>
+   920→   920→                      {loading ? (
+   921→   921→                        Array.from({ length: 10 }).map((_, i) => (
+   922→   922→                          <TableRow key={i}>
+   923→   923→                            {Array.from({ length: 9 }).map((_, j) => (
+   924→   924→                              <TableCell key={j}>
+   925→   925→                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+   926→   926→                              </TableCell>
+   927→   927→                            ))}
+   928→   928→                          </TableRow>
+   929→   929→                        ))
+   930→   930→                      ) : ranking.length === 0 ? (
+   931→   931→                        <TableRow>
+   932→   932→                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+   933→   933→                            No se encontraron registros
+   934→   934→                          </TableCell>
+   935→   935→                        </TableRow>
+   936→   936→                      ) : (
+   937→   937→                        ranking.map((item) => (
+   938→   938→                          <TableRow key={item.legajo} className="hover:bg-slate-50 transition-colors">
+   939→   939→                            <TableCell className="text-center">
+   940→   940→                              <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${getRankBadgeColor(item.ranking)}`}>
+   941→   941→                                {item.ranking}
+   942→   942→                              </span>
+   943→   943→                            </TableCell>
+   944→   944→                            <TableCell className="font-mono text-sm">{item.legajo}</TableCell>
+   945→   945→                            <TableCell className="font-medium">{item.nombre}</TableCell>
+   946→   946→                            <TableCell className="text-right font-mono text-sm">
+   947→   947→                              {formatHHMMSS(item.totalMinutos)}
+   948→   948→                            </TableCell>
+   949→   949→                            <TableCell className="text-right font-mono text-sm text-orange-600 hidden md:table-cell">
+   950→   950→                              {formatHHMMSS(item.descuentoMinutos || 0)}
+   951→   951→                            </TableCell>
+   952→   952→                            <TableCell className="text-right font-semibold font-mono text-sm text-red-600">
+   953→   953→                              {formatHHMMSS(item.netoMinutos)}
+   954→   954→                            </TableCell>
+   955→   955→                            <TableCell className="text-right hidden sm:table-cell">
+   956→   956→                              <Badge variant="secondary">{item.cantidadSalidas}</Badge>
+   957→   957→                            </TableCell>
+   958→   958→                            <TableCell className="text-right text-sm text-slate-500 hidden lg:table-cell">
+   959→   959→                              {formatDuration(item.promedioMinutos)}
+   960→   960→                            </TableCell>
+   961→   961→                            <TableCell className="hidden xl:table-cell text-xs text-slate-500" title={item.turno}>
+   962→   962→                              {item.turno.length > 25 ? item.turno.substring(0, 25) + '...' : item.turno}
+   963→   963→                            </TableCell>
+   964→   964→                          </TableRow>
+   965→   965→                        ))
+   966→   966→                      )}
+   967→   967→                    </TableBody>
+   968→   968→                  </Table>
+   969→   969→                </div>
+   970→   970→
+   971→   971→                {totalPages > 1 && (
+   972→   972→                  <div className="flex items-center justify-between px-4 py-3 border-t">
+   973→   973→                    <p className="text-sm text-slate-500">
+   974→   974→                      Mostrando {(page - 1) * 25 + 1} a {Math.min(page * 25, totalItems)} de {totalItems}
+   975→   975→                    </p>
+   976→   976→                    <div className="flex gap-2">
+   977→   977→                      <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+   978→   978→                        Anterior
+   979→   979→                      </Button>
+   980→   980→                      <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+   981→   981→                        Siguiente
+   982→   982→                      </Button>
+   983→   983→                    </div>
+   984→   984→                  </div>
+   985→   985→                )}
+   986→   986→              </CardContent>
+   987→   987→            </Card>
+   988→   988→          </TabsContent>
+   989→   989→
+   990→   990→          {/* Movimientos */}
+   991→   991→          <TabsContent value="movimientos">
+   992→   992→            <Card>
+   993→   993→              <CardHeader className="pb-3">
+   994→   994→                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+   995→   995→                  <div>
+   996→   996→                    <CardTitle className="text-lg flex items-center gap-2">
+   997→   997→                      <ArrowRightLeft className="h-5 w-5" />
+   998→   998→                      Todos los Movimientos
+   999→   999→                    </CardTitle>
+  1000→  1000→                    <CardDescription>
+  1001→  1001→                      {egresosCount} egresos, {ingresosCount} ingresos. {filteredMovements.length} registros mostrados.
+  1002→  1002→                    </CardDescription>
+  1003→  1003→                  </div>
+  1004→  1004→                  <div className="flex items-center gap-2">
+  1005→  1005→                    <Button size="sm" variant="outline" className="gap-2" onClick={downloadMovementsCSV} disabled={!movements || movements.length === 0}>
+  1006→  1006→                      <ArrowDownToLine className="h-4 w-4" />
+  1007→  1007→                      CSV
+  1008→  1008→                    </Button>
+  1009→  1009→                  </div>
+  1010→  1010→                </div>
+  1011→  1011→              </CardHeader>
+  1012→  1012→              <CardContent className="space-y-4">
+  1013→  1013→                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+  1014→  1014→                  <div>
+  1015→  1015→                    <label className="text-xs font-medium text-slate-500 mb-1 block">Filtrar por Nombre/Legajo</label>
+  1016→  1016→                    <Input
+  1017→  1017→                      placeholder="Todos"
+  1018→  1018→                      value={movNombre}
+  1019→  1019→                      onChange={(e) => setMovNombre(e.target.value)}
+  1020→  1020→                      className="h-9"
+  1021→  1021→                    />
+  1022→  1022→                  </div>
+  1023→  1023→                  <div>
+  1024→  1024→                    <label className="text-xs font-medium text-slate-500 mb-1 block">Filtrar por Fecha</label>
+  1025→  1025→                    <Select value={movFecha || '__all__'} onValueChange={(v) => setMovFecha(v === '__all__' ? '' : v)}>
+  1026→  1026→                      <SelectTrigger className="h-9">
+  1027→  1027→                        <SelectValue placeholder="Todas" />
+  1028→  1028→                      </SelectTrigger>
+  1029→  1029→                      <SelectContent>
+  1030→  1030→                        <SelectItem value="__all__">Todas las fechas</SelectItem>
+  1031→  1031→                        {movUniqueDates.map((d) => (
+  1032→  1032→                          <SelectItem key={d} value={d}>{formatDateDisplay(d)}</SelectItem>
+  1033→  1033→                        ))}
+  1034→  1034→                      </SelectContent>
+  1035→  1035→                    </Select>
+  1036→  1036→                  </div>
+  1037→  1037→                  <div className="flex items-end">
+  1038→  1038→                    <Button className="gap-2 h-9" onClick={fetchFilteredMovements} disabled={movLoading}>
+  1039→  1039→                      {movLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+  1040→  1040→                      Filtrar
+  1041→  1041→                    </Button>
+  1042→  1042→                  </div>
+  1043→  1043→                  <div className="flex items-end">
+  1044→  1044→                    {(movNombre || movFecha) && (
+  1045→  1045→                      <Button variant="ghost" size="sm" onClick={() => { setMovNombre(''); setMovFecha(''); fetchAllMovements() }} className="h-9 text-slate-500">
+  1046→  1046→                        Ver todos
+  1047→  1047→                      </Button>
+  1048→  1048→                    )}
+  1049→  1049→                  </div>
+  1050→  1050→                </div>
+  1051→  1051→
+  1052→  1052→                {movAutoNames.length > 0 && movNombre.length >= 2 && (
+  1053→  1053→                  <div className="flex flex-wrap gap-1">
+  1054→  1054→                    <span className="text-xs text-slate-400">Sugerencias:</span>
+  1055→  1055→                    {movAutoNames
+  1056→  1056→                      .filter(n => n.toLowerCase().includes(movNombre.toLowerCase()))
+  1057→  1057→                      .slice(0, 10)
+  1058→  1058→                      .map(n => (
+  1059→  1059→                        <Badge
+  1060→  1060→                          key={n}
+  1061→  1061→                          variant="outline"
+  1062→  1062→                          className="text-xs cursor-pointer hover:bg-slate-100 transition-colors"
+  1063→  1063→                          onClick={() => setMovNombre(n)}
+  1064→  1064→                        >
+  1065→  1065→                          {n}
+  1066→  1066→                        </Badge>
+  1067→  1067→                      ))}
+  1068→  1068→                  </div>
+  1069→  1069→                )}
+  1070→  1070→
+  1071→  1071→                <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-md border">
+  1072→  1072→                  <Table>
+  1073→  1073→                    <TableHeader className="sticky top-0 bg-white z-10">
+  1074→  1074→                      <TableRow className="bg-slate-50">
+  1075→  1075→                        <TableHead className="w-28">Tipo</TableHead>
+  1076→  1076→                        <TableHead className="w-20">Legajo</TableHead>
+  1077→  1077→                        <TableHead>Nombre</TableHead>
+  1078→  1078→                        <TableHead className="w-28">Fecha</TableHead>
+  1079→  1079→                        <TableHead className="w-20 text-center">Hora</TableHead>
+  1080→  1080→                        <TableHead className="w-32 text-right">Dur. desde anterior</TableHead>
+  1081→  1081→                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
+  1082→  1082→                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+  1083→  1083→                        <TableHead className="hidden xl:table-cell">Empresa</TableHead>
+  1084→  1084→                      </TableRow>
+  1085→  1085→                    </TableHeader>
+  1086→  1086→                    <TableBody>
+  1087→  1087→                      {movLoading ? (
+  1088→  1088→                        Array.from({ length: 8 }).map((_, i) => (
+  1089→  1089→                          <TableRow key={i}>
+  1090→  1090→                            {Array.from({ length: 9 }).map((_, j) => (
+  1091→  1091→                              <TableCell key={j}>
+  1092→  1092→                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+  1093→  1093→                              </TableCell>
+  1094→  1094→                            ))}
+  1095→  1095→                          </TableRow>
+  1096→  1096→                        ))
+  1097→  1097→                      ) : filteredMovements.length === 0 ? (
+  1098→  1098→                        <TableRow>
+  1099→  1099→                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+  1100→  1100→                            No hay movimientos cargados. Subí un archivo Excel para comenzar.
+  1101→  1101→                          </TableCell>
+  1102→  1102→                        </TableRow>
+  1103→  1103→                      ) : (
+  1104→  1104→                        filteredMovements.map((m, idx) => (
+  1105→  1105→                          <TableRow
+  1106→  1106→                            key={`${m.legajo}-${m.fecha}-${m.hora}-${m.tipo}-${idx}`}
+  1107→  1107→                            className={m.tipo === 'Comida TK' ? 'bg-emerald-100/70' : m.tipo === 'Salida Depo' ? 'bg-red-50/50' : 'bg-green-50/50'}
+  1108→  1108→                          >
+  1109→  1109→                            <TableCell>
+  1110→  1110→                              {m.tipo === 'Comida TK' ? (
+  1111→  1111→                                <Badge className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white">Comida TK</Badge>
+  1112→  1112→                              ) : (
+  1113→  1113→                                <Badge variant={m.tipo === 'Salida Depo' ? 'destructive' : 'default'} className="text-xs">
+  1114→  1114→                                  {m.tipo === 'Salida Depo' ? 'Egreso' : 'Ingreso'}
+  1115→  1115→                                </Badge>
+  1116→  1116→                              )}
+  1117→  1117→                            </TableCell>
+  1118→  1118→                            <TableCell className="font-mono text-sm">{m.legajo || '-'}</TableCell>
+  1119→  1119→                            <TableCell className="font-medium text-sm">{m.nombre}</TableCell>
+  1120→  1120→                            <TableCell className="text-sm">{formatDateDisplay(m.fecha)}</TableCell>
+  1121→  1121→                            <TableCell className="text-center font-mono text-sm">{m.hora}</TableCell>
+  1122→  1122→                            <TableCell className="text-right text-sm">
+  1123→  1123→                              {m.duracionMinutos ? formatDuration(m.duracionMinutos) : '-'}
+  1124→  1124→                            </TableCell>
+  1125→  1125→                            <TableCell className="hidden lg:table-cell text-xs text-slate-500" title={m.turno}>
+  1126→  1126→                              {m.turno.length > 20 ? m.turno.substring(0, 20) + '...' : m.turno}
+  1127→  1127→                            </TableCell>
+  1128→  1128→                            <TableCell className="hidden md:table-cell text-sm">{m.sector}</TableCell>
+  1129→  1129→                            <TableCell className="hidden xl:table-cell text-sm">{m.empresa}</TableCell>
+  1130→  1130→                          </TableRow>
+  1131→  1131→                        ))
+  1132→  1132→                      )}
+  1133→  1133→                    </TableBody>
+  1134→  1134→                  </Table>
+  1135→  1135→                </div>
+  1136→  1136→              </CardContent>
+  1137→  1137→            </Card>
+  1138→  1138→          </TabsContent>
+  1139→  1139→
+  1140→  1140→          {/* Inconsistencias */}
+  1141→  1141→          <TabsContent value="inconsistencias">
+  1142→  1142→            <Card>
+  1143→  1143→              <CardHeader className="pb-3">
+  1144→  1144→                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+  1145→  1145→                  <div>
+  1146→  1146→                    <CardTitle className="text-lg flex items-center gap-2">
+  1147→  1147→                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+  1148→  1148→                      Doble Entrada
+  1149→  1149→                    </CardTitle>
+  1150→  1150→                    <CardDescription>
+  1151→  1151→                      Empleados con dos ingresos consecutivos sin registrar salida. {anomalies.length} encontradas.
+  1152→  1152→                    </CardDescription>
+  1153→  1153→                  </div>
+  1154→  1154→                  <div className="flex items-center gap-2">
+  1155→  1155→                    <Button size="sm" variant="outline" className="gap-2" onClick={downloadAnomaliesCSV} disabled={anomalies.length === 0}>
+  1156→  1156→                      <ArrowDownToLine className="h-4 w-4" />
+  1157→  1157→                      CSV
+  1158→  1158→                    </Button>
+  1159→  1159→                    <Button size="sm" variant="outline" className="gap-2" onClick={fetchAnomalies}>
+  1160→  1160→                      <RefreshCw className="h-4 w-4" />
+  1161→  1161→                      Actualizar
+  1162→  1162→                    </Button>
+  1163→  1163→                  </div>
+  1164→  1164→                </div>
+  1165→  1165→              </CardHeader>
+  1166→  1166→              <CardContent className="space-y-4">
+  1167→  1167→                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+  1168→  1168→                  <div>
+  1169→  1169→                    <label className="text-xs font-medium text-slate-500 mb-1 block">Buscar Nombre/Legajo</label>
+  1170→  1170→                    <Input
+  1171→  1171→                      placeholder="Todos"
+  1172→  1172→                      value={anomSearch}
+  1173→  1173→                      onChange={(e) => setAnomSearch(e.target.value)}
+  1174→  1174→                      className="h-9"
+  1175→  1175→                    />
+  1176→  1176→                  </div>
+  1177→  1177→                  <div>
+  1178→  1178→                    <label className="text-xs font-medium text-slate-500 mb-1 block">Fecha</label>
+  1179→  1179→                    <Select value={anomFecha || '__all__'} onValueChange={(v) => setAnomFecha(v === '__all__' ? '' : v)}>
+  1180→  1180→                      <SelectTrigger className="h-9">
+  1181→  1181→                        <SelectValue placeholder="Todas" />
+  1182→  1182→                      </SelectTrigger>
+  1183→  1183→                      <SelectContent>
+  1184→  1184→                        <SelectItem value="__all__">Todas</SelectItem>
+  1185→  1185→                        {anomUniqueDates.map((d) => (
+  1186→  1186→                          <SelectItem key={d} value={d}>{formatDateDisplay(d)}</SelectItem>
+  1187→  1187→                        ))}
+  1188→  1188→                      </SelectContent>
+  1189→  1189→                    </Select>
+  1190→  1190→                  </div>
+  1191→  1191→                  <Button className="gap-2 h-9" onClick={fetchAnomalies} disabled={anomLoading}>
+  1192→  1192→                    {anomLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+  1193→  1193→                    Filtrar
+  1194→  1194→                  </Button>
+  1195→  1195→                </div>
+  1196→  1196→
+  1197→  1197→                <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-md border">
+  1198→  1198→                  <Table>
+  1199→  1199→                    <TableHeader className="sticky top-0 bg-white z-10">
+  1200→  1200→                      <TableRow className="bg-amber-50">
+  1201→  1201→                        <TableHead className="w-20">Legajo</TableHead>
+  1202→  1202→                        <TableHead>Nombre</TableHead>
+  1203→  1203→                        <TableHead className="w-28">Fecha</TableHead>
+  1204→  1204→                        <TableHead className="w-20 text-center">1ra Entrada</TableHead>
+  1205→  1205→                        <TableHead className="w-20 text-center">2da Entrada</TableHead>
+  1206→  1206→                        <TableHead className="w-24 text-center">Diferencia</TableHead>
+  1207→  1207→                        <TableHead className="hidden md:table-cell">Turno</TableHead>
+  1208→  1208→                        <TableHead className="hidden lg:table-cell">Sector</TableHead>
+  1209→  1209→                        <TableHead className="hidden xl:table-cell">Empresa</TableHead>
+  1210→  1210→                      </TableRow>
+  1211→  1211→                    </TableHeader>
+  1212→  1212→                    <TableBody>
+  1213→  1213→                      {anomLoading ? (
+  1214→  1214→                        Array.from({ length: 5 }).map((_, i) => (
+  1215→  1215→                          <TableRow key={i}>
+  1216→  1216→                            {Array.from({ length: 9 }).map((_, j) => (
+  1217→  1217→                              <TableCell key={j}>
+  1218→  1218→                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+  1219→  1219→                              </TableCell>
+  1220→  1220→                            ))}
+  1221→  1221→                          </TableRow>
+  1222→  1222→                        ))
+  1223→  1223→                      ) : anomalies.length === 0 ? (
+  1224→  1224→                        <TableRow>
+  1225→  1225→                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+  1226→  1226→                            No se encontraron dobles entradas
+  1227→  1227→                          </TableCell>
+  1228→  1228→                        </TableRow>
+  1229→  1229→                      ) : (
+  1230→  1230→                        anomalies.map((a, idx) => (
+  1231→  1231→                          <TableRow key={a.id || idx} className="bg-amber-50/50 hover:bg-amber-100/50 transition-colors">
+  1232→  1232→                            <TableCell className="font-mono text-sm">{a.legajo}</TableCell>
+  1233→  1233→                            <TableCell className="font-medium text-sm">{a.nombre}</TableCell>
+  1234→  1234→                            <TableCell className="text-sm">{formatDateDisplay(a.fecha)}</TableCell>
+  1235→  1235→                            <TableCell className="text-center font-mono text-sm font-medium text-green-700">{a.horaEntrada1}</TableCell>
+  1236→  1236→                            <TableCell className="text-center font-mono text-sm font-medium text-green-700">{a.horaEntrada2}</TableCell>
+  1237→  1237→                            <TableCell className="text-center">
+  1238→  1238→                              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 font-mono">
+  1239→  1239→                                {formatDuration(a.diferenciaMinutos)}
+  1240→  1240→                              </Badge>
+  1241→  1241→                            </TableCell>
+  1242→  1242→                            <TableCell className="hidden md:table-cell text-xs text-slate-500">{a.turno}</TableCell>
+  1243→  1243→                            <TableCell className="hidden lg:table-cell text-sm">{a.sector}</TableCell>
+  1244→  1244→                            <TableCell className="hidden xl:table-cell text-sm">{a.empresa}</TableCell>
+  1245→  1245→                          </TableRow>
+  1246→  1246→                        ))
+  1247→  1247→                      )}
+  1248→  1248→                    </TableBody>
+  1249→  1249→                  </Table>
+  1250→  1250→                </div>
+  1251→  1251→              </CardContent>
+  1252→  1252→            </Card>
+  1253→  1253→          </TabsContent>
+  1254→  1254→
+  1255→  1255→          {/* Exceso de Desayuno */}
+  1256→  1256→          <TabsContent value="desayuno">
+  1257→  1257→            <Card>
+  1258→  1258→              <CardHeader className="pb-3">
+  1259→  1259→                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+  1260→  1260→                  <div>
+  1261→  1261→                    <CardTitle className="text-lg flex items-center gap-2">
+  1262→  1262→                      <Coffee className="h-5 w-5 text-amber-600" />
+  1263→  1263→                      Exceso de Desayuno
+  1264→  1264→                    </CardTitle>
+  1265→  1265→                    <CardDescription>
+  1266→  1266→                      Diferencias superiores a 25 minutos entre las 06:30 y 10:30 hs
+  1267→  1267→                      {breakfastExcess.length > 0 && ` — ${breakfastExcess.length} registro(s)`}
+  1268→  1268→                    </CardDescription>
+  1269→  1269→                  </div>
+  1270→  1270→                  <div className="flex items-center gap-2">
+  1271→  1271→                    <Button size="sm" variant="outline" className="gap-2" onClick={() => fetchBreakfastExcess()} disabled={breakfastLoading}>
+  1272→  1272→                      <RefreshCw className={`h-4 w-4 ${breakfastLoading ? 'animate-spin' : ''}`} />
+  1273→  1273→                      Actualizar
+  1274→  1274→                    </Button>
+  1275→  1275→                  </div>
+  1276→  1276→                </div>
+  1277→  1277→              </CardHeader>
+  1278→  1278→              <CardContent className="p-0">
+  1279→  1279→                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+  1280→  1280→                  <Table>
+  1281→  1281→                    <TableHeader className="sticky top-0 bg-white z-10">
+  1282→  1282→                      <TableRow className="bg-slate-50">
+  1283→  1283→                        <TableHead className="w-20">Legajo</TableHead>
+  1284→  1284→                        <TableHead>Nombre</TableHead>
+  1285→  1285→                        <TableHead className="w-28">Fecha</TableHead>
+  1286→  1286→                        <TableHead className="w-20 text-center">H. Salida</TableHead>
+  1287→  1287→                        <TableHead className="w-20 text-center">H. Entrada</TableHead>
+  1288→  1288→                        <TableHead className="text-right">Duración Total</TableHead>
+  1289→  1289→                        <TableHead className="text-right">Exceso</TableHead>
+  1290→  1290→                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
+  1291→  1291→                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+  1292→  1292→                      </TableRow>
+  1293→  1293→                    </TableHeader>
+  1294→  1294→                    <TableBody>
+  1295→  1295→                      {breakfastLoading ? (
+  1296→  1296→                        Array.from({ length: 6 }).map((_, i) => (
+  1297→  1297→                          <TableRow key={i}>
+  1298→  1298→                            {Array.from({ length: 9 }).map((_, j) => (
+  1299→  1299→                              <TableCell key={j}>
+  1300→  1300→                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+  1301→  1301→                              </TableCell>
+  1302→  1302→                            ))}
+  1303→  1303→                          </TableRow>
+  1304→  1304→                        ))
+  1305→  1305→                      ) : breakfastExcess.length === 0 ? (
+  1306→  1306→                        <TableRow>
+  1307→  1307→                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+  1308→  1308→                            No hay excesos de desayuno registrados
+  1309→  1309→                          </TableCell>
+  1310→  1310→                        </TableRow>
+  1311→  1311→                      ) : (
+  1312→  1312→                        breakfastExcess.map((b, idx) => (
+  1313→  1313→                          <TableRow key={`${b.legajo}-${b.fecha}-${b.horaSalida}-${idx}`} className="hover:bg-amber-50/50 transition-colors">
+  1314→  1314→                            <TableCell className="font-mono text-sm">{b.legajo}</TableCell>
+  1315→  1315→                            <TableCell className="font-medium text-sm">{b.nombre}</TableCell>
+  1316→  1316→                            <TableCell className="text-sm">{formatDateDisplay(b.fecha)}</TableCell>
+  1317→  1317→                            <TableCell className="text-center font-mono text-sm">{b.horaSalida}</TableCell>
+  1318→  1318→                            <TableCell className="text-center font-mono text-sm">{b.horaEntrada}</TableCell>
+  1319→  1319→                            <TableCell className="text-right font-mono text-sm">{formatHHMMSS(b.duracionTotal)}</TableCell>
+  1320→  1320→                            <TableCell className="text-right font-semibold font-mono text-sm text-red-600">
+  1321→  1321→                              +{formatHHMMSS(b.excesoMinutos)}
+  1322→  1322→                            </TableCell>
+  1323→  1323→                            <TableCell className="hidden lg:table-cell text-xs text-slate-500">{b.turno}</TableCell>
+  1324→  1324→                            <TableCell className="hidden md:table-cell text-xs text-slate-500">{b.sector}</TableCell>
+  1325→  1325→                          </TableRow>
+  1326→  1326→                        ))
+  1327→  1327→                      )}
+  1328→  1328→                    </TableBody>
+  1329→  1329→                  </Table>
+  1330→  1330→                </div>
+  1331→  1331→              </CardContent>
+  1332→  1332→            </Card>
+  1333→  1333→          </TabsContent>
+  1334→  1334→
+  1335→  1335→          {/* Break TN */}
+  1336→  1336→          <TabsContent value="break-tn">
+  1337→  1337→            <Card>
+  1338→  1338→              <CardHeader className="pb-3">
+  1339→  1339→                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+  1340→  1340→                  <div>
+  1341→  1341→                    <CardTitle className="text-lg flex items-center gap-2">
+  1342→  1342→                      <Moon className="h-5 w-5 text-indigo-600" />
+  1343→  1343→                      Break TN
+  1344→  1344→                    </CardTitle>
+  1345→  1345→                    <CardDescription>
+  1346→  1346→                      Diferencias superiores a 15 minutos entre las 02:45 y 03:45 hs
+  1347→  1347→                      {tnBreakExcess.length > 0 && ` — ${tnBreakExcess.length} registro(s)`}
+  1348→  1348→                    </CardDescription>
+  1349→  1349→                  </div>
+  1350→  1350→                  <div className="flex items-center gap-2">
+  1351→  1351→                    <Button size="sm" variant="outline" className="gap-2" onClick={() => fetchTnBreakExcess()} disabled={tnBreakLoading}>
+  1352→  1352→                      <RefreshCw className={`h-4 w-4 ${tnBreakLoading ? 'animate-spin' : ''}`} />
+  1353→  1353→                      Actualizar
+  1354→  1354→                    </Button>
+  1355→  1355→                  </div>
+  1356→  1356→                </div>
+  1357→  1357→              </CardHeader>
+  1358→  1358→              <CardContent className="p-0">
+  1359→  1359→                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+  1360→  1360→                  <Table>
+  1361→  1361→                    <TableHeader className="sticky top-0 bg-white z-10">
+  1362→  1362→                      <TableRow className="bg-slate-50">
+  1363→  1363→                        <TableHead className="w-20">Legajo</TableHead>
+  1364→  1364→                        <TableHead>Nombre</TableHead>
+  1365→  1365→                        <TableHead className="w-28">Fecha</TableHead>
+  1366→  1366→                        <TableHead className="w-20 text-center">H. Salida</TableHead>
+  1367→  1367→                        <TableHead className="w-20 text-center">H. Entrada</TableHead>
+  1368→  1368→                        <TableHead className="text-right">Duración Total</TableHead>
+  1369→  1369→                        <TableHead className="text-right">Exceso</TableHead>
+  1370→  1370→                        <TableHead className="hidden lg:table-cell">Turno</TableHead>
+  1371→  1371→                        <TableHead className="hidden md:table-cell">Sector</TableHead>
+  1372→  1372→                      </TableRow>
+  1373→  1373→                    </TableHeader>
+  1374→  1374→                    <TableBody>
+  1375→  1375→                      {tnBreakLoading ? (
+  1376→  1376→                        Array.from({ length: 6 }).map((_, i) => (
+  1377→  1377→                          <TableRow key={i}>
+  1378→  1378→                            {Array.from({ length: 9 }).map((_, j) => (
+  1379→  1379→                              <TableCell key={j}>
+  1380→  1380→                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+  1381→  1381→                              </TableCell>
+  1382→  1382→                            ))}
+  1383→  1383→                          </TableRow>
+  1384→  1384→                        ))
+  1385→  1385→                      ) : tnBreakExcess.length === 0 ? (
+  1386→  1386→                        <TableRow>
+  1387→  1387→                          <TableCell colSpan={9} className="text-center py-12 text-slate-500">
+  1388→  1388→                            No hay excesos de break TN registrados
+  1389→  1389→                          </TableCell>
+  1390→  1390→                        </TableRow>
+  1391→  1391→                      ) : (
+  1392→  1392→                        tnBreakExcess.map((b, idx) => (
+  1393→  1393→                          <TableRow key={`${b.legajo}-${b.fecha}-${b.horaSalida}-${idx}`} className="hover:bg-indigo-50/50 transition-colors">
+  1394→  1394→                            <TableCell className="font-mono text-sm">{b.legajo}</TableCell>
+  1395→  1395→                            <TableCell className="font-medium text-sm">{b.nombre}</TableCell>
+  1396→  1396→                            <TableCell className="text-sm">{formatDateDisplay(b.fecha)}</TableCell>
+  1397→  1397→                            <TableCell className="text-center font-mono text-sm">{b.horaSalida}</TableCell>
+  1398→  1398→                            <TableCell className="text-center font-mono text-sm">{b.horaEntrada}</TableCell>
+  1399→  1399→                            <TableCell className="text-right font-mono text-sm">{formatHHMMSS(b.duracionTotal)}</TableCell>
+  1400→  1400→                            <TableCell className="text-right font-semibold font-mono text-sm text-red-600">
+  1401→  1401→                              +{formatHHMMSS(b.excesoMinutos)}
+  1402→  1402→                            </TableCell>
+  1403→  1403→                            <TableCell className="hidden lg:table-cell text-xs text-slate-500">{b.turno}</TableCell>
+  1404→  1404→                            <TableCell className="hidden md:table-cell text-xs text-slate-500">{b.sector}</TableCell>
+  1405→  1405→                          </TableRow>
+  1406→  1406→                        ))
+  1407→  1407→                      )}
+  1408→  1408→                    </TableBody>
+  1409→  1409→                  </Table>
+  1410→  1410→                </div>
+  1411→  1411→              </CardContent>
+  1412→  1412→            </Card>
+  1413→  1413→          </TabsContent>
+  1414→  1414→
+  1415→  1415→          {/* Horario Comida */}
+  1416→  1416→          <TabsContent value="comida">
+  1417→  1417→            <Card>
+  1418→  1418→              <CardHeader className="pb-3">
+  1419→  1419→                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+  1420→  1420→                  <div>
+  1421→  1421→                    <CardTitle className="text-lg flex items-center gap-2">
+  1422→  1422→                      <UtensilsCrossed className="h-5 w-5 text-orange-600" />
+  1423→  1423→                      Horario Comida
+  1424→  1424→                    </CardTitle>
+  1425→  1425→                    <CardDescription>
+  1426→  1426→                      Registro de tickets de comida por trabajador
+  1427→  1427→                      {comidaTotal > 0 && ` — ${comidaSummary.trabajadores} trabajadores, ${comidaSummary.dias} días, ${comidaTotal} registros`}
+  1428→  1428→                    </CardDescription>
+  1429→  1429→                  </div>
+  1430→  1430→                  <div className="flex items-center gap-2">
+  1431→  1431→                    <Input
+  1432→  1432→                      placeholder="Buscar nombre o DNI..."
+  1433→  1433→                      value={comidaSearch}
+  1434→  1434→                      onChange={(e) => { setComidaSearch(e.target.value); setComidaPage(1) }}
+  1435→  1435→                      className="w-48 h-8 text-sm"
+  1436→  1436→                    />
+  1437→  1437→                    <Button size="sm" variant="outline" className="gap-2" onClick={() => fetchComidaData()} disabled={comidaLoading}>
+  1438→  1438→                      <RefreshCw className={`h-4 w-4 ${comidaLoading ? 'animate-spin' : ''}`} />
+  1439→  1439→                      Actualizar
+  1440→  1440→                    </Button>
+  1441→  1441→                  </div>
+  1442→  1442→                </div>
+  1443→  1443→              </CardHeader>
+  1444→  1444→              <CardContent className="p-0">
+  1445→  1445→                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+  1446→  1446→                  <Table>
+  1447→  1447→                    <TableHeader className="sticky top-0 bg-white z-10">
+  1448→  1448→                      <TableRow className="bg-slate-50">
+  1449→  1449→                        <TableHead className="w-24">DNI</TableHead>
+  1450→  1450→                        <TableHead>Nombre</TableHead>
+  1451→  1451→                        <TableHead className="w-28">Fecha</TableHead>
+  1452→  1452→                        <TableHead className="w-20 text-center">Horario</TableHead>
+  1453→  1453→                      </TableRow>
+  1454→  1454→                    </TableHeader>
+  1455→  1455→                    <TableBody>
+  1456→  1456→                      {comidaLoading ? (
+  1457→  1457→                        Array.from({ length: 8 }).map((_, i) => (
+  1458→  1458→                          <TableRow key={i}>
+  1459→  1459→                            {Array.from({ length: 4 }).map((_, j) => (
+  1460→  1460→                              <TableCell key={j}>
+  1461→  1461→                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+  1462→  1462→                              </TableCell>
+  1463→  1463→                            ))}
+  1464→  1464→                          </TableRow>
+  1465→  1465→                        ))
+  1466→  1466→                      ) : comidaData.length === 0 ? (
+  1467→  1467→                        <TableRow>
+  1468→  1468→                          <TableCell colSpan={4} className="text-center py-12 text-slate-500">
+  1469→  1469→                            No hay datos de comida cargados. Usá el botón "Cargar Comida" para subir el Excel.
+  1470→  1470→                          </TableCell>
+  1471→  1471→                        </TableRow>
+  1472→  1472→                      ) : (
+  1473→  1473→                        comidaData.map((c, idx) => (
+  1474→  1474→                          <TableRow key={`${c.dni}-${c.fecha}-${c.horario}-${idx}`} className="hover:bg-orange-50/50 transition-colors">
+  1475→  1475→                            <TableCell className="font-mono text-sm">{c.dni}</TableCell>
+  1476→  1476→                            <TableCell className="font-medium text-sm">{c.nombre}</TableCell>
+  1477→  1477→                            <TableCell className="text-sm">{formatDateDisplay(c.fecha)}</TableCell>
+  1478→  1478→                            <TableCell className="text-center font-mono text-sm">{c.horario}</TableCell>
+  1479→  1479→                          </TableRow>
+  1480→  1480→                        ))
+  1481→  1481→                      )}
+  1482→  1482→                    </TableBody>
+  1483→  1483→                  </Table>
+  1484→  1484→                </div>
+  1485→  1485→                {comidaTotalPages > 1 && (
+  1486→  1486→                  <div className="flex items-center justify-between px-4 py-3 border-t">
+  1487→  1487→                    <span className="text-sm text-slate-500">{comidaTotal} registros</span>
+  1488→  1488→                    <div className="flex items-center gap-2">
+  1489→  1489→                      <Button size="sm" variant="outline" disabled={comidaPage <= 1} onClick={() => setComidaPage(p => p - 1)}>Anterior</Button>
+  1490→  1490→                      <span className="text-sm">Pág. {comidaPage} de {comidaTotalPages}</span>
+  1491→  1491→                      <Button size="sm" variant="outline" disabled={comidaPage >= comidaTotalPages} onClick={() => setComidaPage(p => p + 1)}>Siguiente</Button>
+  1492→  1492→                    </div>
+  1493→  1493→                  </div>
+  1494→  1494→                )}
+  1495→  1495→              </CardContent>
+  1496→  1496→            </Card>
+  1497→  1497→          </TabsContent>
+  1498→  1498→        </Tabs>
+  1499→  1499→      </main>
+  1500→  1500→    </div>
+  1501→  1501→  )
+  1502→  1502→}

@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Upload, Clock, Users, TrendingUp, Search, Trophy,
-  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee, Moon, UtensilsCrossed
+  BarChart3, RefreshCw, List, ArrowDownToLine, ArrowRightLeft, CalendarDays, AlertTriangle, LogOut, LogIn, X, ChevronsUpDown, Check, Coffee, Moon, UtensilsCrossed, ScanFace
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -135,6 +135,8 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState(false)
   const [uploadingComida, setUploadingComida] = useState(false)
   const comidaFileRef = useRef<HTMLInputElement>(null)
+  const [uploadingFacial, setUploadingFacial] = useState(false)
+  const facialFileRef = useRef<HTMLInputElement>(null)
 
   // Filter state
   const [sectorFilter, setSectorFilter] = useState<string[]>([])
@@ -278,6 +280,37 @@ export default function Dashboard() {
     }
   }
 
+  const handleFacialUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingFacial(true)
+    try {
+      toast.info('Procesando archivo de facial...')
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/facial/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+
+      if (res.ok) {
+        toast.success(data.message || `${data.inserted} registros de facial cargados`)
+        fetchFacialData()
+        fetchAllMovements()
+      } else {
+        toast.error(`Error: ${data.error}`)
+      }
+    } catch (err) {
+      toast.error('Error al procesar facial: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setUploadingFacial(false)
+      if (facialFileRef.current) facialFileRef.current.value = ''
+    }
+  }
+
   // Movements state
   const [movements, setMovements] = useState<MovementItem[]>([])
   const [movLoading, setMovLoading] = useState(false)
@@ -317,6 +350,26 @@ export default function Dashboard() {
         setComidaMovMerge(map)
       } catch (e) {
         console.error('Error fetching comida for movements:', e)
+      }
+
+      // Also fetch facial for the same date range to merge into movements
+      try {
+        const fParams = new URLSearchParams()
+        if (fechaDesde) fParams.set('fechaDesde', toISODate(fechaDesde))
+        if (fechaHasta) fParams.set('fechaHasta', toISODate(fechaHasta))
+        fParams.set('pageSize', '9999')
+        const fRes = await fetch(`/api/facial?${fParams}`)
+        const fData = await fRes.json()
+        // Build map: key = apellido_fecha -> array of facial records
+        const fmap = new Map<string, any[]>()
+        for (const f of (fData.data || [])) {
+          const key = `${f.apellido.toUpperCase().trim()}_${f.fecha}`
+          if (!fmap.has(key)) fmap.set(key, [])
+          fmap.get(key)!.push(f)
+        }
+        setFacialMovMerge(fmap)
+      } catch (e) {
+        console.error('Error fetching facial for movements:', e)
       }
     } catch (err) {
       console.error('Error fetching movements:', err)
@@ -375,6 +428,16 @@ export default function Dashboard() {
   const [comidaLoading, setComidaLoading] = useState(false)
   const [comidaSearch, setComidaSearch] = useState('')
   const [comidaSummary, setComidaSummary] = useState({ trabajadores: 0, dias: 0 })
+
+  // Facial state
+  const [facialData, setFacialData] = useState<any[]>([])
+  const [facialMovMerge, setFacialMovMerge] = useState<Map<string, any[]>>(new Map())
+  const [facialTotal, setFacialTotal] = useState(0)
+  const [facialPage, setFacialPage] = useState(1)
+  const [facialTotalPages, setFacialTotalPages] = useState(0)
+  const [facialLoading, setFacialLoading] = useState(false)
+  const [facialSearch, setFacialSearch] = useState('')
+  const [facialSummary, setFacialSummary] = useState({ trabajadores: 0, dias: 0 })
 
   const fetchAnomalies = useCallback(async () => {
     setAnomLoading(true)
@@ -458,6 +521,30 @@ export default function Dashboard() {
     fetchComidaData()
   }, [fetchComidaData])
 
+  const fetchFacialData = useCallback(async () => {
+    setFacialLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (facialSearch) params.set('search', facialSearch)
+      params.set('page', String(facialPage))
+      const res = await fetch(`/api/facial?${params}`)
+      const data = await res.json()
+      setFacialData(data.data || [])
+      setFacialTotal(data.total || 0)
+      setFacialTotalPages(data.totalPages || 0)
+      setFacialSummary(data.summary || { trabajadores: 0, dias: 0 })
+    } catch (err) {
+      console.error('Error fetching facial:', err)
+    } finally {
+      setFacialLoading(false)
+    }
+  }, [facialSearch, facialPage])
+
+  // Auto-fetch facial when tab is opened or search/page changes
+  useEffect(() => {
+    fetchFacialData()
+  }, [fetchFacialData])
+
   useEffect(() => {
     if (filters.fechaMin) {
       fetchAnomalies()
@@ -524,9 +611,10 @@ export default function Dashboard() {
   const fechasCargadas = movUniqueDates.length > 0 ? movUniqueDates.sort().map(formatDateDisplay) : []
 
   const filteredMovements = useMemo(() => {
-    // Merge comida records into movements
+    // Merge comida and facial records into movements
     const merged: MovementItem[] = []
     const usedComida = new Set<string>()
+    const usedFacial = new Set<string>()
 
     for (const m of movements) {
       if (movNombre && !m.nombre.toLowerCase().includes(movNombre.toLowerCase()) && !m.legajo.includes(movNombre)) continue
@@ -559,7 +647,37 @@ export default function Dashboard() {
       }
     }
 
-    // Sort by fecha DESC, then hora ASC (comida rows interleave correctly)
+    // Add facial rows matched by apellido (last word of nombre) and fecha
+    for (const m of merged) {
+      if (m.tipo === 'Comida TK' || m.tipo === 'Facial Entrada' || m.tipo === 'Facial Salida') continue
+      const nameParts = m.nombre.trim().toUpperCase().split(/\s+/)
+      const apellido = nameParts[nameParts.length - 1] || ''
+      if (!apellido) continue
+      const fKey = `${apellido}_${m.fecha}`
+      const facials = facialMovMerge.get(fKey)
+      if (facials) {
+        for (const f of facials) {
+          const fIdKey = `${f.dni}_${f.fecha}_${f.horario}_${f.zona}`
+          if (!usedFacial.has(fIdKey)) {
+            usedFacial.add(fIdKey)
+            const tipo = f.zona.includes('Entrada') ? 'Facial Entrada' : 'Facial Salida'
+            merged.push({
+              tipo,
+              legajo: '',
+              nombre: m.nombre,
+              fecha: f.fecha,
+              hora: f.horario,
+              turno: '',
+              sector: '',
+              empresa: '',
+              duracionMinutos: null,
+            })
+          }
+        }
+      }
+    }
+
+    // Sort by fecha DESC, then hora ASC (comida/facial rows interleave correctly)
     merged.sort((a, b) => {
       if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha)
       if (a.legajo && b.legajo && a.legajo !== b.legajo) return a.legajo.localeCompare(b.legajo)
@@ -567,7 +685,7 @@ export default function Dashboard() {
     })
 
     return merged
-  }, [movements, movNombre, movFecha, comidaMovMerge])
+  }, [movements, movNombre, movFecha, comidaMovMerge, facialMovMerge])
 
   const totalFichadas = movements.length
   const egresosCount = movements.filter(m => m.tipo === 'Salida Depo').length
@@ -607,6 +725,17 @@ export default function Dashboard() {
             <Button variant="outline" size="sm" className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50" disabled={uploadingComida} onClick={() => comidaFileRef.current?.click()}>
               {uploadingComida ? <RefreshCw className="h-4 w-4 animate-spin" /> : <UtensilsCrossed className="h-4 w-4" />}
               {uploadingComida ? 'Procesando...' : 'Cargar Comida'}
+            </Button>
+            <input
+              ref={facialFileRef}
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleFacialUpload}
+              className="hidden"
+            />
+            <Button variant="outline" size="sm" className="gap-2 border-blue-300 text-blue-700 hover:bg-blue-50" disabled={uploadingFacial} onClick={() => facialFileRef.current?.click()}>
+              {uploadingFacial ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ScanFace className="h-4 w-4" />}
+              {uploadingFacial ? 'Procesando...' : 'Cargar Facial'}
             </Button>
           </div>
         </div>
@@ -863,6 +992,10 @@ export default function Dashboard() {
               <UtensilsCrossed className="h-4 w-4" />
               Horario Comida
             </TabsTrigger>
+            <TabsTrigger value="facial" className="gap-2">
+              <ScanFace className="h-4 w-4" />
+              Horario Facial
+            </TabsTrigger>
           </TabsList>
 
           {/* Ranking Table */}
@@ -1104,10 +1237,14 @@ export default function Dashboard() {
                         filteredMovements.map((m, idx) => (
                           <TableRow
                             key={`${m.legajo}-${m.fecha}-${m.hora}-${m.tipo}-${idx}`}
-                            className={m.tipo === 'Comida TK' ? 'bg-emerald-100/70' : m.tipo === 'Salida Depo' ? 'bg-red-50/50' : 'bg-green-50/50'}
+                            className={m.tipo === 'Facial Entrada' || m.tipo === 'Facial Salida' ? 'bg-sky-100/70' : m.tipo === 'Comida TK' ? 'bg-emerald-100/70' : m.tipo === 'Salida Depo' ? 'bg-red-50/50' : 'bg-green-50/50'}
                           >
                             <TableCell>
-                              {m.tipo === 'Comida TK' ? (
+                              {m.tipo === 'Facial Entrada' ? (
+                                <Badge className="text-xs bg-sky-600 hover:bg-sky-700 text-white">Facial Ingreso</Badge>
+                              ) : m.tipo === 'Facial Salida' ? (
+                                <Badge className="text-xs bg-sky-600 hover:bg-sky-700 text-white">Facial Egreso</Badge>
+                              ) : m.tipo === 'Comida TK' ? (
                                 <Badge className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white">Comida TK</Badge>
                               ) : (
                                 <Badge variant={m.tipo === 'Salida Depo' ? 'destructive' : 'default'} className="text-xs">
@@ -1489,6 +1626,96 @@ export default function Dashboard() {
                       <Button size="sm" variant="outline" disabled={comidaPage <= 1} onClick={() => setComidaPage(p => p - 1)}>Anterior</Button>
                       <span className="text-sm">Pág. {comidaPage} de {comidaTotalPages}</span>
                       <Button size="sm" variant="outline" disabled={comidaPage >= comidaTotalPages} onClick={() => setComidaPage(p => p + 1)}>Siguiente</Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Horario Facial */}
+          <TabsContent value="facial">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <ScanFace className="h-5 w-5 text-blue-600" />
+                      Horario Facial
+                    </CardTitle>
+                    <CardDescription>
+                      Registro de ingresos/egresos por reconocimiento facial
+                      {facialTotal > 0 && ` — ${facialSummary.trabajadores} trabajadores, ${facialSummary.dias} días, ${facialTotal} registros`}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="Buscar nombre o DNI..."
+                      value={facialSearch}
+                      onChange={(e) => { setFacialSearch(e.target.value); setFacialPage(1) }}
+                      className="w-48 h-8 text-sm"
+                    />
+                    <Button size="sm" variant="outline" className="gap-2" onClick={() => fetchFacialData()} disabled={facialLoading}>
+                      <RefreshCw className={`h-4 w-4 ${facialLoading ? 'animate-spin' : ''}`} />
+                      Actualizar
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-white z-10">
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="w-24">DNI</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-28">Fecha</TableHead>
+                        <TableHead className="w-20 text-center">Horario</TableHead>
+                        <TableHead className="w-28 text-center">Zona</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {facialLoading ? (
+                        Array.from({ length: 8 }).map((_, i) => (
+                          <TableRow key={i}>
+                            {Array.from({ length: 5 }).map((_, j) => (
+                              <TableCell key={j}>
+                                <div className="h-4 bg-slate-200 animate-pulse rounded" />
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : facialData.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-12 text-slate-500">
+                            No hay datos de facial cargados. Usá el botón "Cargar Facial" para subir el Excel.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        facialData.map((f, idx) => (
+                          <TableRow key={`${f.dni}-${f.fecha}-${f.horario}-${f.zona}-${idx}`} className="hover:bg-sky-50/50 transition-colors">
+                            <TableCell className="font-mono text-sm">{f.dni}</TableCell>
+                            <TableCell className="font-medium text-sm">{f.nombre}</TableCell>
+                            <TableCell className="text-sm">{formatDateDisplay(f.fecha)}</TableCell>
+                            <TableCell className="text-center font-mono text-sm">{f.horario}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant={f.zona.includes('Entrada') ? 'default' : 'destructive'} className="text-xs">
+                                {f.zona.includes('Entrada') ? 'Ingreso' : 'Egreso'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                {facialTotalPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t">
+                    <span className="text-sm text-slate-500">{facialTotal} registros</span>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" disabled={facialPage <= 1} onClick={() => setFacialPage(p => p - 1)}>Anterior</Button>
+                      <span className="text-sm">Pág. {facialPage} de {facialTotalPages}</span>
+                      <Button size="sm" variant="outline" disabled={facialPage >= facialTotalPages} onClick={() => setFacialPage(p => p + 1)}>Siguiente</Button>
                     </div>
                   </div>
                 )}

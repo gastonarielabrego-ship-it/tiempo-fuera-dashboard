@@ -71,3 +71,18 @@ model Comida {
   @@index([dni, fecha])
   @@index([fecha])
 }
+
+model Facial {
+  id         String   @id @default(cuid())
+  dni        String
+  nombre     String
+  apellido   String
+  fecha      String
+  horario    String
+  zona       String
+  createdAt  DateTime @default(now())
+
+  @@index([dni, fecha])
+  @@index([fecha])
+  @@index([apellido, fecha])
+}
